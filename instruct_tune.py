@@ -33,6 +33,7 @@ def main(
     logging_dir: str = "logs",
     logging_steps: int = 100,
     max_seq_length: int = 128,
+    save_model: bool = False
 ):
     # Load the model and tokenizer
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -50,6 +51,7 @@ def main(
     train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
     train_dataset = train_dataset.map(create_example)
 
+    # Set up trainer
     sft_config = SFTConfig(
         output_dir=output_dir,
         per_device_train_batch_size=per_device_train_batch_size,
@@ -72,6 +74,10 @@ def main(
     # Train the model
     trainer.train()
 
+    # Save the model
+    if save_model:
+        trainer.save_model(output_dir)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", type=str, default="microsoft/Phi-3-mini-4k-instruct")
@@ -84,5 +90,6 @@ if __name__ == "__main__":
     parser.add_argument("--logging_dir", type=str, default="logs")
     parser.add_argument("--logging_steps", type=int, default=100)
     parser.add_argument("--max_seq_length", type=int, default=128)
+    parser.add_argument("--save_model", action="store_true")
     args = parser.parse_args()
     main(**vars(args))
