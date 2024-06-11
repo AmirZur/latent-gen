@@ -1,4 +1,5 @@
 import argparse
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
@@ -34,7 +35,13 @@ def main(
     max_seq_length: int = 128,
 ):
     # Load the model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name_or_path,
+        torch_dtype=torch.bfloat16,
+        device_map=device,
+        trust_remote_code=True
+    )
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     if not tokenizer.pad_token_id:
         tokenizer.pad_token = tokenizer.eos_token
