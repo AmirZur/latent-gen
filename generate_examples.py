@@ -61,7 +61,7 @@ def main(
                 max_new_tokens=max_new_tokens, 
                 pad_token_id=tokenizer.eos_token_id
             )
-        outputs.append(tokenizer.decode(generation[0], skip_special_tokens=True))
+        outputs.append(tokenizer.decode(generation[0]))
     
     orig_perplexities, gen_perplexities = [], []
     for example, output in tqdm(
