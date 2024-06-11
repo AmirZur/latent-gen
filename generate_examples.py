@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -63,7 +64,9 @@ def main(
         outputs.append(tokenizer.decode(generation[0], skip_special_tokens=True))
     
     orig_perplexities, gen_perplexities = [], []
-    for example, output in tqdm(zip(examples, outputs), desc="Calculating perplexities..."):
+    for example, output in tqdm(
+        zip(examples, outputs), total=len(examples), desc="Calculating perplexities..."
+    ):
         messages = example['messages']
         orig_inputs = tokenizer.apply_chat_template(
             messages,
@@ -90,6 +93,7 @@ def main(
             for i in range(num_examples)
         ]
     }
+    os.makedirs(output_dir, exist_ok=True)
     with open(f'{output_dir}/outputs.json', 'w+') as f:
         json.dump(results, f, indent=4)
 
