@@ -1,7 +1,7 @@
 import argparse
 import json
 import torch
-import tqdm
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 
