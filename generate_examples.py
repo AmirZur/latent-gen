@@ -70,12 +70,12 @@ def main(
             return_tensors="pt"
         ).to(device)
         with torch.no_grad():
-            orig_perplexity = model(input_ids=orig_inputs).loss
+            orig_perplexity = model(input_ids=orig_inputs, labels=orig_inputs).loss
             orig_perplexities.append(torch.exp(orig_perplexity).item())
 
         gen_inputs = tokenizer(output, return_tensors="pt").to(device)
         with torch.no_grad():
-            gen_perplexity = model(**gen_inputs).loss
+            gen_perplexity = model(**gen_inputs, labels=gen_inputs['input_ids']).loss
             gen_perplexities.append(torch.exp(gen_perplexity).item())
     
     results = {
