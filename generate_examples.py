@@ -53,27 +53,27 @@ def main(
             example['messages'][:1],
             return_tensors="pt",
             add_generation_prompt=True
-        )
+        ).to(device)
         with torch.no_grad():
             generation = model.generate(
-                **inputs, 
+                input_ids=inputs, 
                 max_new_tokens=max_new_tokens, 
                 pad_token_id=tokenizer.eos_token_id
             )
         outputs.append(tokenizer.decode(generation[0], skip_special_tokens=True))
     
-    orig_perplexities, gen_perplexities = []
+    orig_perplexities, gen_perplexities = [], []
     for example, output in tqdm(zip(examples, outputs), desc="Calculating perplexities..."):
         messages = example['messages']
         orig_inputs = tokenizer.apply_chat_template(
             messages,
             return_tensors="pt"
-        )
+        ).to(device)
         with torch.no_grad():
-            orig_perplexity = model(**orig_inputs).loss
+            orig_perplexity = model(input_ids=orig_inputs).loss
             orig_perplexities.append(torch.exp(orig_perplexity).item())
 
-        gen_inputs = tokenizer(output, return_tensors="pt")
+        gen_inputs = tokenizer(output, return_tensors="pt").to(device)
         with torch.no_grad():
             gen_perplexity = model(**gen_inputs).loss
             gen_perplexities.append(torch.exp(gen_perplexity).item())
