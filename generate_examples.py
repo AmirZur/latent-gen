@@ -90,7 +90,7 @@ def main(
             for i in range(num_examples)
         ]
     }
-    with open(f'{output_dir}/outputs.json', 'w') as f:
+    with open(f'{output_dir}/outputs.json', 'w+') as f:
         json.dump(results, f, indent=4)
 
 if __name__ == "__main__":
