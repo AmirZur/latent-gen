@@ -61,7 +61,8 @@ def main(
         logging_dir=logging_dir,
         logging_steps=logging_steps,
         max_seq_length=max_seq_length,
-        report_to=[]
+        report_to=[],
+        save_strategy="none"
     )
 
     trainer = SFTTrainer(
