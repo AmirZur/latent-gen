@@ -1,10 +1,14 @@
 import argparse
 import json
+import random
 import os
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
+
+SEED = 42
+random.seed(SEED)
 
 PROMPT_TEMPLATE = """Write a short restaurant review for the following restaurant:
 Name: {restaurant_name}
@@ -26,10 +30,9 @@ def create_example(example):
 
 def main(
     model_name_or_path: str = "microsoft/Phi-3-mini-4k-instruct",
-    dataset_split: str = "train_observational",
     output_dir: str = "inst_gens",
     num_examples: int = 100,
-    max_new_tokens: int = 128,
+    max_new_tokens: int = 256,
     **generate_kwargs
 ):
     # Load the model and tokenizer
@@ -45,12 +48,18 @@ def main(
         tokenizer.pad_token = tokenizer.eos_token
 
     # Load the dataset
-    train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
+    train_dataset = load_dataset("CEBaB/CEBaB", split="train_inclusive")
     train_dataset = train_dataset.map(create_example)
+    
+    original_examples = train_dataset.filter(
+        lambda x: x['is_original']
+    ).shuffle(seed=SEED).select(range(num_examples))
 
-    examples = train_dataset.select(range(num_examples))
-    outputs = []
-    for example in tqdm(examples, desc="Generating examples..."):
+    edited_examples = train_dataset.filter(
+        lambda x: x['original_id'] in original_examples['original_id']
+    )
+
+    def generate_example(example):
         inputs = tokenizer.apply_chat_template(
             example['messages'][:1],
             return_tensors="pt",
@@ -63,49 +72,55 @@ def main(
                 pad_token_id=tokenizer.eos_token_id,
                 **generate_kwargs
             )
-        outputs.append(tokenizer.decode(generation[0]))
-    
-    orig_perplexities, gen_perplexities = [], []
-    for example, output in tqdm(
-        zip(examples, outputs), total=len(examples), desc="Calculating perplexities..."
-    ):
+        return {
+            'generation': tokenizer.decode(generation[0])
+        }
+
+    original_examples = original_examples.map(
+        generate_example, desc="Generating model completions..."
+    )
+
+    def compute_example_perplexity(example):
         messages = example['messages']
-        orig_inputs = tokenizer.apply_chat_template(
+        inputs = tokenizer.apply_chat_template(
             messages,
             return_tensors="pt"
         ).to(device)
         with torch.no_grad():
-            orig_perplexity = model(input_ids=orig_inputs, labels=orig_inputs).loss
-            orig_perplexities.append(torch.exp(orig_perplexity).item())
+            perplexity = model(input_ids=inputs, labels=inputs).loss
+            perplexity.append(torch.exp(perplexity).item())
+        return {
+            'description_perplexity': perplexity
+        }
 
-        gen_inputs = tokenizer(output, return_tensors="pt").to(device)
+    edited_examples = edited_examples.map(
+        compute_example_perplexity, desc="Computing description perplexities..."
+    )
+
+    def compute_output_perplexity(example):
+        inputs = tokenizer(example['generation'], return_tensors="pt").to(device)
         with torch.no_grad():
-            gen_perplexity = model(**gen_inputs, labels=gen_inputs['input_ids']).loss
-            gen_perplexities.append(torch.exp(gen_perplexity).item())
-    
-    results = {
-        'results': [
-            {
-                'prompt': examples[i]['messages'][0]['content'],
-                'original_completion': examples[i]['messages'][1]['content'],
-                'model_completion': outputs[i],
-                'original_perplexity': orig_perplexities[i],
-                'model_perplexity': gen_perplexities[i]
-            }
-            for i in range(num_examples)
-        ]
-    }
+            perplexity = model(**inputs, labels=inputs['input_ids']).loss
+            perplexity.append(torch.exp(perplexity).item())
+        return {
+            'generation_perplexity': perplexity
+        }
+
+    original_examples = original_examples.map(
+        compute_output_perplexity, desc="Computing generation perplexities..."
+    )
+
     os.makedirs(output_dir, exist_ok=True)
-    with open(f'{output_dir}/outputs.json', 'w+') as f:
-        json.dump(results, f, indent=4)
+    
+    original_examples.save_to_disk(os.path.join(output_dir, "original_examples"))
+    edited_examples.save_to_disk(os.path.join(output_dir, "edited_examples"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", type=str, default="microsoft/Phi-3-mini-4k-instruct")
-    parser.add_argument("--dataset_split", type=str, default="train_observational")
     parser.add_argument("--output_dir", type=str, default="inst_gens")
     parser.add_argument("--num_examples", type=int, default=100)
-    parser.add_argument("--max_new_tokens", type=int, default=128)
+    parser.add_argument("--max_new_tokens", type=int, default=256)
     # generation arguments
     parser.add_argument("--do_sample", action="store_true")
     parser.add_argument("--temperature", type=float, default=0.7)

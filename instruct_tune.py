@@ -49,7 +49,7 @@ def main(
 
     # Load the dataset
     train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
-    train_dataset = train_dataset.map(create_example)
+    train_dataset = train_dataset.map(create_example, remove_columns=train_dataset.features)
 
     # Set up trainer
     sft_config = SFTConfig(
