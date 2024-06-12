@@ -29,7 +29,8 @@ def main(
     dataset_split: str = "train_observational",
     output_dir: str = "inst_gens",
     num_examples: int = 100,
-    max_new_tokens: int = 128
+    max_new_tokens: int = 128,
+    **generate_kwargs
 ):
     # Load the model and tokenizer
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -59,7 +60,8 @@ def main(
             generation = model.generate(
                 input_ids=inputs, 
                 max_new_tokens=max_new_tokens, 
-                pad_token_id=tokenizer.eos_token_id
+                pad_token_id=tokenizer.eos_token_id,
+                **generate_kwargs
             )
         outputs.append(tokenizer.decode(generation[0]))
     
@@ -104,5 +106,8 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="inst_gens")
     parser.add_argument("--num_examples", type=int, default=100)
     parser.add_argument("--max_new_tokens", type=int, default=128)
+    # generation arguments
+    parser.add_argument("--do_sample", action="store_true")
+    parser.add_argument("--temperature", type=float, default=0.7)
     args = parser.parse_args()
     main(**vars(args))
