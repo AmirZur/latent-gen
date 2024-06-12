@@ -87,8 +87,9 @@ def main(
             return_tensors="pt"
         ).to(device)
         with torch.no_grad():
-            perplexity = model(input_ids=inputs, labels=inputs).loss
-            perplexity.append(torch.exp(perplexity).item())
+            perplexity = torch.exp(
+                model(input_ids=inputs, labels=inputs).loss
+            ).item()
         return {
             'description_perplexity': perplexity
         }
@@ -100,8 +101,9 @@ def main(
     def compute_output_perplexity(example):
         inputs = tokenizer(example['generation'], return_tensors="pt").to(device)
         with torch.no_grad():
-            perplexity = model(**inputs, labels=inputs['input_ids']).loss
-            perplexity.append(torch.exp(perplexity).item())
+            perplexity = torch.exp(
+                model(**inputs, labels=inputs['input_ids']).loss
+            ).item()
         return {
             'generation_perplexity': perplexity
         }
