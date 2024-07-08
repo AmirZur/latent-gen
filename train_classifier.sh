@@ -1,5 +1,5 @@
 python train_classifier.py \
-    --model_name_or_path "bert-base" \
+    --model_name_or_path "bert-base-uncased" \
     --dataset_split "train_inclusive" \
     --output_dir "train_classifier" \
     --per_device_train_batch_size 32 \
