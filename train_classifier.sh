@@ -9,5 +9,5 @@ python train_classifier.py \
     --logging_dir "logs" \
     --logging_steps 1 \
     --max_seq_length 256 \
-    --eval_steps 100 \
+    --eval_steps 10 \
     --save_model
