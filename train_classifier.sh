@@ -7,7 +7,7 @@ python train_classifier.py \
     --num_train_epochs 3 \
     --learning_rate 1e-5 \
     --logging_dir "logs" \
-    --logging_steps 10 \
+    --logging_steps 1 \
     --max_seq_length 256 \
     --eval_steps 100 \
     --save_model
