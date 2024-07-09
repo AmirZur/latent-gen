@@ -28,7 +28,7 @@ def main(
     )
     outputs = model(**inputs)
     predictions = outputs.logits.argmax(dim=-1).tolist()
-    dataset = dataset.add_column(predictions, 'predictions')
+    dataset = dataset.add_column('predictions', predictions)
     dataset.save_to_disk(output_dir)
 
 if __name__ == "__main__":
