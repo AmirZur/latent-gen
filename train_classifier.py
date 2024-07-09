@@ -67,7 +67,7 @@ def main(
         model_name_or_path,
         num_labels=3,
         device_map=device,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float32,
         trust_remote_code=True
     )
     if model.config.pad_token_id is None:
