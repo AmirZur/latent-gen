@@ -1,5 +1,5 @@
 python train_classifier.py \
-    --model_name_or_path "bert-base-uncased" \
+    --model_name_or_path "meta-llama/Llama-2-7b-hf" \
     --dataset_split "train_inclusive" \
     --output_dir "train_classifier" \
     --per_device_train_batch_size 32 \
