@@ -27,13 +27,13 @@ def main(
         dataset['generation'], return_tensors='pt', padding=True, truncation=True
     )
     outputs = model(**inputs)
-    predictions = outputs.logits.argmax(dim=-1)
+    predictions = outputs.logits.argmax(dim=-1).tolist()
     dataset = dataset.add_column(predictions, 'predictions')
     dataset.save_to_disk(output_dir)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", type=str, default="classifier_train")
+    parser.add_argument("--model_name_or_path", type=str, default="train_classifier")
     parser.add_argument("--data_dir", type=str, default="inst_gens/original_examples")
     parser.add_argument("--output_dir", type=str, default="inst_gens/labeled_examples")
     args = parser.parse_args()
