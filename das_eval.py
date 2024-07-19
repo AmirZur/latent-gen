@@ -89,7 +89,8 @@ def create_toy_dataset(
         num_interventions=num_interventions,
         nonstop=nonstop,
         share_weights=share_weights,
-        intervention_offset=intervention_offset
+        intervention_offset=intervention_offset,
+        evaluation=True
     )
 
 def create_dataset(
@@ -149,7 +150,8 @@ def create_dataset(
         num_interventions=num_interventions,
         nonstop=nonstop,
         share_weights=share_weights,
-        intervention_offset=intervention_offset
+        intervention_offset=intervention_offset,
+        evaluation=True
     )
 
 def evaluate(model, tokenizer, data_module, **generate_kwargs):

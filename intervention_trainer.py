@@ -224,7 +224,8 @@ def make_complex_position_supervised_data_module(
     num_interventions=1, 
     nonstop=False, 
     share_weights=False,
-    intervention_offset=0
+    intervention_offset=0,
+    evaluation=False
 ) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
     first_n, last_n, decode_intv = parse_complex_positions(positions)
@@ -250,6 +251,10 @@ def make_complex_position_supervised_data_module(
             base_input, max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")["input_ids"][0]
         output_ids = copy.deepcopy(base_input_ids)
         output_ids[:base_prompt_length] = IGNORE_INDEX
+
+        if evaluation:
+            # chop off base input ids to only include the prompt
+            base_input_ids = base_input_ids[:base_prompt_length]
 
         _source_input = source_inputs[i]
         _source_output = source_outputs[i]
