@@ -1,0 +1,16 @@
+python das.py \
+    --model_name_or_path "meta-llama/Llama-2-7b-hf" \
+    --toy_dataset \
+    --layers "20;24" \
+    --subspace_dim 128 \
+    --positions "l1" \
+    --intervention_offset 0 \
+    --share_weights \
+    --dropout 0 \
+    --num_train_epochs 3 \
+    --learning_rate 1e-3 \
+    --batch_size 8 \
+    --max_seq_length 256 \
+    --logging_steps 10 \
+    --output_dir=das \
+    --use_wandb
