@@ -107,7 +107,7 @@ def create_dataset(
 def evaluate(model, tokenizer, data_module, **generate_kwargs):
     model.eval()
     eval_data = []
-    for d in tqdm(data_module, desc="Evaluating"):
+    for d in tqdm(data_module['train_dataset'], desc="Evaluating"):
         with torch.no_grad():
             original_output, das_output = model.generate(
                 {
