@@ -244,13 +244,12 @@ def main(
 
     print('Model class:', type(model))
     # add Phi3 to pyvene library
-    """Only define for the block output here for simplicity"""
-    pv.type_to_module_mapping[type(model)] = {
-        "block_output": ("layers[%s]", 
-                    pv.models.constants.CONST_OUTPUT_HOOK),
-    }
     pv.type_to_dimension_mapping[type(model)] = {
         "block_output": ("hidden_size",),
+        "model.embed_tokens.output": ("hidden_size",),
+        **{
+            f"model.layers[{int(i)}].output": ("hidden_size",) for i in range(model.config.num_hidden_layers)
+        }
     }
 
     def get_representation(layer, rank):
