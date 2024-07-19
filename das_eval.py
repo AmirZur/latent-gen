@@ -43,6 +43,54 @@ def create_example(example):
     ]
     return {'messages': messages}
 
+def create_toy_dataset(
+    model,
+    tokenizer,
+    num_interventions: int,
+    positions: str = "f1+l1",
+    nonstop: bool = True,
+    share_weights: bool = True,
+    intervention_offset: int = 0
+):
+    prompt = "When {subject} and {object} went to the store, {subject} gave a drink to"
+    names = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Helen", "Ivy", "Jack"]
+    # source subject, source object, base subject, base object
+    dataset = list(itertools.product(names, repeat=4))
+    dataset = [d for d in dataset if d[0] != d[1] and d[2] != d[3] and d[1] != d[3]]
+    random.shuffle(dataset)
+    data = []
+    for d in dataset:
+        source = prompt.format(subject=d[0], object=d[1])
+        base = prompt.format(subject=d[2], object=d[3])
+        base_output = f" {d[3]}" # base object
+        source_output = f" {d[1]}" # source object
+        cf = f" {d[1]}" # same object as source
+        data.append({
+            'base_input': base,
+            'base_output': base_output,
+            'cf_output': cf,
+            'source_input': source,
+            'source_output': source_output
+        })
+    
+    base_inputs = [d['base_input'] for d in data]
+    cf_outputs = [d['cf_output'] for d in data]
+    source_inputs = [d['source_input'] for d in data]
+    source_outputs = [d['source_output'] for d in data]
+
+    return make_complex_position_supervised_data_module(
+        tokenizer,
+        model,
+        base_inputs,
+        cf_outputs,
+        source_inputs,
+        source_outputs,
+        positions=positions,
+        num_interventions=num_interventions,
+        nonstop=nonstop,
+        share_weights=share_weights,
+        intervention_offset=intervention_offset
+    )
 
 def create_dataset(
     model,
@@ -106,31 +154,33 @@ def create_dataset(
 
 def evaluate(model, tokenizer, data_module, **generate_kwargs):
     model.eval()
+    device = model.get_device()
     eval_data = []
     for d in tqdm(data_module['train_dataset'], desc="Evaluating"):
         with torch.no_grad():
             original_output, das_output = model.generate(
                 {
-                    "input_ids": d["input_ids"],
+                    "input_ids": torch.tensor(d["input_ids"]).unsqueeze(0).to(device),
                 },
                 sources=[{
-                    "input_ids": d["source_input_ids"],
+                    "input_ids": torch.tensor(d["source_input_ids"]).unsqueeze(0).to(device),
                 }],
                 unit_locations={"sources->base": (
                     # copy from
-                    d['source_intervention_locations'],
+                    torch.tensor([d['source_intervention_locations']]).permute(1, 0, 2).tolist(),
                     # paste to
-                    d["intervention_locations"]
+                    torch.tensor([d["intervention_locations"]]).permute(1, 0, 2).tolist()
                 )},
                 subspaces=0,
                 output_original_output=True,
+                use_cache=False,
                 **generate_kwargs
             )
             eval_data.append({
                 "original_output": tokenizer.decode(original_output[0], skip_special_tokens=True),
                 "das_output": tokenizer.decode(das_output[0], skip_special_tokens=True),
-                "base": tokenizer.decode(d["input_ids"][0], skip_special_tokens=True),
-                "source": tokenizer.decode(d["source_input_ids"][0], skip_special_tokens=True),
+                "base": tokenizer.decode(d["input_ids"], skip_special_tokens=True),
+                "source": tokenizer.decode(d["source_input_ids"], skip_special_tokens=True),
             })
     return eval_data
 
@@ -156,6 +206,7 @@ def main(
     share_weights: bool = False,
     intervention_offset: int = 0,
     # dataset args
+    toy_dataset: bool = False,
     dataset_split: str = "train_inclusive",
     aspect: str = "service",
     # generation args
@@ -177,6 +228,7 @@ def main(
         f"  share_weights: {share_weights}\n"
         f"  intervention_offset: {intervention_offset}\n"
         f"Dataset args:\n"
+        f"  toy_dataset: {toy_dataset}\n"
         f"  dataset_split: {dataset_split}\n"
         f"  aspect: {aspect}\n"
         f"Generation args:\n"
@@ -219,20 +271,32 @@ def main(
         das_path,
         model
     )
+    train_model.set_device(device)
 
     print('Loaded model. Number of interventions:', len(train_model.interventions))
 
-    data_module = create_dataset(
-        model=model,
-        tokenizer=tokenizer,
-        num_interventions=len(train_model.interventions),
-        positions=positions,
-        nonstop=True,
-        share_weights=share_weights,
-        dataset_split=dataset_split,
-        aspect=aspect,
-        intervention_offset=intervention_offset
-    )
+    if toy_dataset:
+        data_module = create_toy_dataset(
+            model=model,
+            tokenizer=tokenizer,
+            num_interventions=len(train_model.interventions),
+            positions=positions,
+            nonstop=True,
+            share_weights=share_weights,
+            intervention_offset=intervention_offset
+        )
+    else:
+        data_module = create_dataset(
+            model=model,
+            tokenizer=tokenizer,
+            num_interventions=len(train_model.interventions),
+            positions=positions,
+            nonstop=True,
+            share_weights=share_weights,
+            dataset_split=dataset_split,
+            aspect=aspect,
+            intervention_offset=intervention_offset
+        )
 
     eval_data = evaluate(
         train_model,
@@ -265,6 +329,7 @@ if __name__ == "__main__":
     parser.add_argument("--share_weights", action="store_true")
     parser.add_argument("--intervention_offset", type=int, default=0)
     # dataset args
+    parser.add_argument("--toy_dataset", action="store_true")
     parser.add_argument("--dataset_split", type=str, default="train_inclusive")
     parser.add_argument("--aspect", type=str, default="service")
     # generation args
