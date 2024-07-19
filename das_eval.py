@@ -207,6 +207,16 @@ def main(
     )
     tokenizer.pad_token = tokenizer.unk_token
 
+    print('Model class:', type(model))
+    # add Phi3 to pyvene library
+    pv.type_to_dimension_mapping[type(model)] = {
+        "block_output": ("hidden_size",),
+        "model.embed_tokens.output": ("hidden_size",),
+        **{
+            f"model.layers[{int(i)}].output": ("hidden_size",) for i in range(model.config.num_hidden_layers)
+        }
+    }
+
     train_model = pv.IntervenableModel.load(
         das_path,
         model
