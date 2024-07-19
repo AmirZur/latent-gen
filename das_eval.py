@@ -112,11 +112,9 @@ def evaluate(model, tokenizer, data_module, **generate_kwargs):
             original_output, das_output = model.generate(
                 {
                     "input_ids": d["input_ids"],
-                    "attention_mask": d["attention_mask"],
                 },
                 sources=[{
                     "input_ids": d["source_input_ids"],
-                    "attention_mask": d["source_attention_mask"],
                 }],
                 unit_locations={"sources->base": (
                     # copy from
