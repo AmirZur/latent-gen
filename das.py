@@ -16,16 +16,6 @@ import wandb
 from datasets import load_dataset
 from intervention_trainer import make_complex_position_supervised_data_module, InterventionTrainerForCausalLM
 
-# add Phi3 to pyvene library
-"""Only define for the block output here for simplicity"""
-pv.type_to_module_mapping[transformers.PhiForCausalLM] = {
-    "block_output": ("layers[%s]", 
-                   pv.models.constants.CONST_OUTPUT_HOOK),
-}
-pv.type_to_dimension_mapping[transformers.PhiForCausalLM] = {
-    "block_output": ("hidden_size",),
-}
-
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -251,6 +241,17 @@ def main(
         trust_remote_code=True
     )
     tokenizer.pad_token = tokenizer.unk_token
+
+    print('Model class:', type(model))
+    # add Phi3 to pyvene library
+    """Only define for the block output here for simplicity"""
+    pv.type_to_module_mapping[type(model)] = {
+        "block_output": ("layers[%s]", 
+                    pv.models.constants.CONST_OUTPUT_HOOK),
+    }
+    pv.type_to_dimension_mapping[type(model)] = {
+        "block_output": ("hidden_size",),
+    }
 
     def get_representation(layer, rank):
         is_gpt2 = "gpt2" in model_name_or_path
