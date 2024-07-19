@@ -3,6 +3,6 @@ python das_eval.py \
     --das_path "das/inst_tune/2024-07-19-10-37-53/weights" \
     --positions "l1" \
     --share_weights \
-    --intervention_offset $i \
+    --intervention_offset 0 \
     --dataset_split "train_inclusive" \
     --output_dir "das_eval"
