@@ -2,7 +2,7 @@ import os
 import argparse
 import itertools
 import json
-from tqdm import tqdm
+from tqdm import tqdm, trange
 import torch
 import transformers
 import datetime
@@ -154,37 +154,57 @@ def create_dataset(
         evaluation=True
     )
 
-def evaluate(model, tokenizer, data_module, **generate_kwargs):
+def evaluate(
+    model, 
+    tokenizer, 
+    data_module, 
+    batch_size=8,
+    **generate_kwargs
+):
     model.eval()
     device = model.get_device()
-    eval_data = []
-    for d in tqdm(data_module['train_dataset'], desc="Evaluating"):
+    original_outputs = []
+    das_outputs = []
+    bases = []
+    sources = []
+    for b in trange(0, len(data_module['train_dataset']), batch_size, desc="Evaluating"):
+        input_ids = torch.tensor(
+            data_module['train_dataset']['input_ids'][b:b+batch_size]
+        )
+        source_input_ids = torch.tensor(
+            data_module['train_dataset']['source_input_ids'][b:b+batch_size]
+        )
+        # (# interventions, batch_size, # positions)
+        source_intervention_locations = torch.tensor(
+            data_module['train_dataset']['source_intervention_locations'][b:b+batch_size]
+        ).permute(1, 0, 2).tolist()
+        intervention_locations = torch.tensor(
+            data_module['train_dataset']['intervention_locations'][b:b+batch_size]
+        ).permute(1, 0, 2).tolist()
         with torch.no_grad():
             original_output, das_output = model.generate(
                 {
-                    "input_ids": torch.tensor(d["input_ids"]).unsqueeze(0).to(device),
+                    "input_ids": input_ids.to(device),
                 },
                 sources=[{
-                    "input_ids": torch.tensor(d["source_input_ids"]).unsqueeze(0).to(device),
+                    "input_ids": source_input_ids.to(device),
                 }],
                 unit_locations={"sources->base": (
                     # copy from
-                    torch.tensor([d['source_intervention_locations']]).permute(1, 0, 2).tolist(),
+                    source_intervention_locations,
                     # paste to
-                    torch.tensor([d["intervention_locations"]]).permute(1, 0, 2).tolist()
+                    intervention_locations
                 )},
                 subspaces=0,
                 output_original_output=True,
                 use_cache=False,
                 **generate_kwargs
             )
-            eval_data.append({
-                "original_output": tokenizer.decode(original_output[0], skip_special_tokens=True),
-                "das_output": tokenizer.decode(das_output[0], skip_special_tokens=True),
-                "base": tokenizer.decode(d["input_ids"], skip_special_tokens=True),
-                "source": tokenizer.decode(d["source_input_ids"], skip_special_tokens=True),
-            })
-    return eval_data
+            original_outputs += tokenizer.batch_decode(original_output, skip_special_tokens=True)
+            das_outputs += tokenizer.batch_decode(das_output, skip_special_tokens=True)
+            bases += tokenizer.batch_decode(input_ids, skip_special_tokens=True)
+            sources += tokenizer.batch_decode(source_input_ids, skip_special_tokens=True)
+    return list(zip(original_outputs, das_outputs, bases, sources))
 
 def print_trainable_parameters(model):
     if isinstance(model, pyreft.ReftModel):
@@ -215,6 +235,7 @@ def main(
     max_new_tokens: int = 256,
     do_sample: bool = False,
     temperature: float = 0.7,
+    batch_size: int = 8,
     # logging args
     output_dir: str = "das_eval",
     # commandline args
@@ -237,6 +258,7 @@ def main(
         f"  max_new_tokens: {max_new_tokens}\n"
         f"  do_sample: {do_sample}\n"
         f"  temperature: {temperature}\n"
+        f"  batch_size: {batch_size}\n"
         f"Logging args:\n"
         f"  output_dir: {output_dir}\n"
     )
@@ -304,6 +326,7 @@ def main(
         train_model,
         tokenizer,
         data_module,
+        batch_size=batch_size,
         max_new_tokens=max_new_tokens,
         do_sample=do_sample,
         temperature=temperature
@@ -338,6 +361,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--do_sample", action="store_true")
     parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--batch_size", type=int, default=8)
     # logging args
     parser.add_argument("--output_dir", type=str, default="adv_reft")
 

@@ -254,6 +254,9 @@ def make_complex_position_supervised_data_module(
 
         if evaluation:
             # chop off base input ids to only include the prompt
+            # skip inputs where offset is longer than output
+            if len(base_input_ids) <= base_prompt_length:
+                continue
             base_input_ids = base_input_ids[:base_prompt_length]
 
         _source_input = source_inputs[i]
