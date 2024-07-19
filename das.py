@@ -229,14 +229,16 @@ def main(
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
         torch_dtype=torch.bfloat16,
-        device_map=device
+        device_map=device,
+        trust_remote_code=True
     )
     # get tokenizer
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_name_or_path,
         model_max_length=2048,
         padding_side="right",
-        use_fast=False
+        use_fast=False,
+        trust_remote_code=True
     )
     tokenizer.pad_token = tokenizer.unk_token
 
