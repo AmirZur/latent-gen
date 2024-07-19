@@ -222,6 +222,8 @@ def main(
         model
     )
 
+    print('Loaded model. Number of interventions:', len(train_model.interventions))
+
     data_module = create_dataset(
         model=model,
         tokenizer=tokenizer,
