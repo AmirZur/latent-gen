@@ -16,6 +16,16 @@ import wandb
 from datasets import load_dataset
 from intervention_trainer import make_complex_position_supervised_data_module, InterventionTrainerForCausalLM
 
+# add Phi3 to pyvene library
+"""Only define for the block output here for simplicity"""
+pv.type_to_module_mapping[transformers.PhiForCausalLM] = {
+    "block_output": ("layers[%s]", 
+                   pv.models.constants.CONST_OUTPUT_HOOK),
+}
+pv.type_to_dimension_mapping[transformers.PhiForCausalLM] = {
+    "block_output": ("hidden_size",),
+}
+
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
