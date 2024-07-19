@@ -1,4 +1,5 @@
 from typing import Dict, Sequence
+from tqdm import tqdm
 import transformers
 from pyreft import ReftTrainer
 import pyvene as pv
@@ -112,6 +113,54 @@ class InterventionTrainer(ReftTrainer):
         )
         # return
         return (cf_outputs.loss, cf_outputs[:2]) if return_outputs else cf_outputs.loss
+    
+    def evaluate(self, **generate_kwargs):
+        # ensure everything is in eval mode
+        self.model.eval()
+        device = self.model.get_device()
+        original_outputs = []
+        das_outputs = []
+        bases = []
+        sources = []
+
+        dataloader = make_dataloader(
+            self.train_dataset, 
+            self.args.eval_batch_size, 
+            self.data_collator, 
+            shuffle=False
+        )
+        eval_iterator = tqdm(dataloader, position=0, leave=True)
+        device = self.model.get_device()
+
+        for inputs in eval_iterator:
+            with torch.no_grad():
+                original_output, das_output = self.model.generate(
+                    # base
+                    {
+                        "input_ids": inputs["input_ids"].to(device),
+                        "attention_mask": inputs["attention_mask"].to(device)
+                    },
+                    # source
+                    sources=[{
+                        "input_ids": inputs["source_input_ids"].to(device),
+                        "attention_mask": inputs["source_attention_mask"].to(device)
+                    }],
+                    unit_locations={"sources->base": (
+                        # copy from
+                        inputs['source_intervention_locations'].permute(1, 0, 2).tolist(),
+                        # paste to
+                        inputs["intervention_locations"].permute(1, 0, 2).tolist()
+                    )},
+                    subspaces=0,
+                    output_original_output=True,
+                    use_cache=False,
+                    **generate_kwargs
+                )
+                original_outputs += self.tokenizer.batch_decode(original_output, skip_special_tokens=True)
+                das_outputs += self.tokenizer.batch_decode(das_output, skip_special_tokens=True)
+                bases += self.tokenizer.batch_decode(inputs["input_ids"], skip_special_tokens=True)
+                sources += self.tokenizer.batch_decode(inputs["source_input_ids"], skip_special_tokens=True)
+        return list(zip(original_outputs, das_outputs, bases, sources))
 
 def make_dataloader(
         dataset: Dataset, batch_size: int, collate_fn: transformers.DataCollatorForSeq2Seq, shuffle: bool
@@ -252,13 +301,6 @@ def make_complex_position_supervised_data_module(
         output_ids = copy.deepcopy(base_input_ids)
         output_ids[:base_prompt_length] = IGNORE_INDEX
 
-        if evaluation:
-            # chop off base input ids to only include the prompt
-            # skip inputs where offset is longer than output
-            if len(base_input_ids) <= base_prompt_length:
-                continue
-            base_input_ids = base_input_ids[:base_prompt_length]
-
         _source_input = source_inputs[i]
         _source_output = source_outputs[i]
         source_prompt = _source_input
@@ -273,6 +315,14 @@ def make_complex_position_supervised_data_module(
         
         # NOTE: if using decoding intervals, use same length to guarantee same # of source & base intervention locations
         last_input_position = min(len(output_ids), len(source_input_ids))
+
+        if evaluation:
+            # chop off base input ids to only include the prompt
+            # skip inputs where offset is longer than output
+            if len(base_input_ids) <= base_prompt_length or \
+                len(source_input_ids) <= source_prompt_length:
+                continue
+            base_input_ids = base_input_ids[:base_prompt_length]
 
         intervention_locations = get_complex_intervention_locations(
             last_prompt_position=base_prompt_length,

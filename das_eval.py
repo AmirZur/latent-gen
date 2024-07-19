@@ -154,58 +154,6 @@ def create_dataset(
         evaluation=True
     )
 
-def evaluate(
-    model, 
-    tokenizer, 
-    data_module, 
-    batch_size=8,
-    **generate_kwargs
-):
-    model.eval()
-    device = model.get_device()
-    original_outputs = []
-    das_outputs = []
-    bases = []
-    sources = []
-    for b in trange(0, len(data_module['train_dataset']), batch_size, desc="Evaluating"):
-        input_ids = torch.tensor(
-            data_module['train_dataset']['input_ids'][b:b+batch_size]
-        )
-        source_input_ids = torch.tensor(
-            data_module['train_dataset']['source_input_ids'][b:b+batch_size]
-        )
-        # (# interventions, batch_size, # positions)
-        source_intervention_locations = torch.tensor(
-            data_module['train_dataset']['source_intervention_locations'][b:b+batch_size]
-        ).permute(1, 0, 2).tolist()
-        intervention_locations = torch.tensor(
-            data_module['train_dataset']['intervention_locations'][b:b+batch_size]
-        ).permute(1, 0, 2).tolist()
-        with torch.no_grad():
-            original_output, das_output = model.generate(
-                {
-                    "input_ids": input_ids.to(device),
-                },
-                sources=[{
-                    "input_ids": source_input_ids.to(device),
-                }],
-                unit_locations={"sources->base": (
-                    # copy from
-                    source_intervention_locations,
-                    # paste to
-                    intervention_locations
-                )},
-                subspaces=0,
-                output_original_output=True,
-                use_cache=False,
-                **generate_kwargs
-            )
-            original_outputs += tokenizer.batch_decode(original_output, skip_special_tokens=True)
-            das_outputs += tokenizer.batch_decode(das_output, skip_special_tokens=True)
-            bases += tokenizer.batch_decode(input_ids, skip_special_tokens=True)
-            sources += tokenizer.batch_decode(source_input_ids, skip_special_tokens=True)
-    return list(zip(original_outputs, das_outputs, bases, sources))
-
 def print_trainable_parameters(model):
     if isinstance(model, pyreft.ReftModel):
         model.print_trainable_parameters()
@@ -322,11 +270,20 @@ def main(
             intervention_offset=intervention_offset
         )
 
-    eval_data = evaluate(
-        train_model,
-        tokenizer,
-        data_module,
-        batch_size=batch_size,
+    training_args = transformers.TrainingArguments(
+        output_dir=output_dir,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=batch_size,
+    )
+
+    trainer = InterventionTrainerForCausalLM(
+        model=train_model,
+        tokenizer=tokenizer,
+        args=training_args,
+        **data_module
+    )
+    
+    eval_data = trainer.evaluate(
         max_new_tokens=max_new_tokens,
         do_sample=do_sample,
         temperature=temperature
