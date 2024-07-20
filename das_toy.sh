@@ -1,13 +1,13 @@
 python das.py \
-    --model_name_or_path "meta-llama/Llama-2-7b-hf" \
+    --model_name_or_path "gpt2" \
     --toy_dataset \
-    --layers "20;24" \
-    --subspace_dim 128 \
+    --layers "6;10" \
+    --subspace_dim 64 \
     --positions "l1" \
     --intervention_offset 0 \
     --share_weights \
     --dropout 0 \
-    --num_train_epochs 3 \
+    --num_train_epochs 20 \
     --learning_rate 1e-3 \
     --batch_size 8 \
     --max_seq_length 256 \
