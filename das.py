@@ -246,9 +246,9 @@ def main(
     if "gpt2" in model_name_or_path:
         pv.type_to_dimension_mapping[type(model)] = {
             "block_output": ("hidden_size",),
-            "model.embed_tokens.output": ("hidden_size",),
+            "transformer.wte.output": ("hidden_size",),
             **{
-                f"model.transformer.h[{i}].output": ("hidden_size",) for i in range(model.config.num_hidden_layers)
+                f"transformer.h[{i}].output": ("hidden_size",) for i in range(model.config.num_hidden_layers)
             }
         }
     else:
@@ -257,7 +257,7 @@ def main(
             "block_output": ("hidden_size",),
             "model.embed_tokens.output": ("hidden_size",),
             **{
-                f"model.layers[{int(i)}].output": ("hidden_size",) for i in range(model.config.num_hidden_layers)
+                f"model.layers[{i}].output": ("hidden_size",) for i in range(model.config.num_hidden_layers)
             }
         }
 
