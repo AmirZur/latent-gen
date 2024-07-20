@@ -153,7 +153,7 @@ class InterventionTrainer(ReftTrainer):
                     )},
                     subspaces=0,
                     output_original_output=True,
-                    use_cache=False,
+                    intervene_on_prompt=True,
                     **generate_kwargs
                 )
                 original_outputs += self.tokenizer.batch_decode(original_output, skip_special_tokens=True)
