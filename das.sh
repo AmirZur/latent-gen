@@ -14,5 +14,6 @@ do
         --max_seq_length 256 \
         --logging_steps 10 \
         --output_dir=das \
-        --use_wandb
+        --use_wandb \
+        --save_model
 done
