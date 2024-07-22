@@ -133,6 +133,11 @@ class InterventionTrainer(ReftTrainer):
         device = self.model.get_device()
 
         for inputs in eval_iterator:
+            # shift intervention locations by left padding amount
+            base_padding = inputs["input_ids"].shape[1] - inputs["attention_mask"].sum(dim=1)
+            source_padding = inputs["source_input_ids"].shape[1] - inputs["source_attention_mask"].sum(dim=1)
+            base_intervention_locations = inputs["intervention_locations"] + base_padding[:, None, None]
+            source_intervention_locations = inputs["source_intervention_locations"] + source_padding[:, None, None]
             with torch.no_grad():
                 original_output, das_output = self.model.generate(
                     # base
@@ -147,9 +152,9 @@ class InterventionTrainer(ReftTrainer):
                     }],
                     unit_locations={"sources->base": (
                         # copy from
-                        inputs['source_intervention_locations'].permute(1, 0, 2).tolist(),
+                        base_intervention_locations.permute(1, 0, 2).tolist(),
                         # paste to
-                        inputs["intervention_locations"].permute(1, 0, 2).tolist()
+                        source_intervention_locations.permute(1, 0, 2).tolist()
                     )},
                     subspaces=0,
                     output_original_output=True,

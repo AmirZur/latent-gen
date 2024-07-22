@@ -219,11 +219,11 @@ def main(
         device_map=device,
         trust_remote_code=True
     )
-    # get tokenizer
+    # use left padding for generation!
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_name_or_path,
         model_max_length=2048,
-        padding_side="right",
+        padding_side="left",
         use_fast=False,
         trust_remote_code=True
     )
