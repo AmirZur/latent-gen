@@ -35,8 +35,8 @@ class InterventionDataCollator(object):
         """
         base_instances = [{
             "input_ids": instance["input_ids"],
-            "labels": instance["labels"],
-            "intervention_locations": instance["intervention_locations"]
+            "intervention_locations": instance["intervention_locations"],
+            "labels": instance["labels"]
         } for instance in instances]
 
         source_instances = [{
@@ -230,9 +230,13 @@ def get_complex_intervention_locations(**kwargs):
     pad_amount = (_first_n - first_n) + (_last_n - last_n)
     pad_position = -1 if pad_mode == "first" else last_prompt_position
     if share_weights or (first_n == 0 or last_n == 0):
-        position_list = [i for i in range(first_n)] + \
-            [i for i in range(last_prompt_position - last_n, last_prompt_position)] + \
-            [pad_position for _ in range(pad_amount)]
+        # position_list = [i for i in range(first_n)] + \
+        #     [i for i in range(last_prompt_position - last_n, last_prompt_position)] + \
+        #     [pad_position for _ in range(pad_amount)]
+        if last_n == 0:
+            position_list = [first_n - 1]
+        else:
+            position_list = [last_prompt_position - last_n]
         intervention_locations = [position_list]*num_interventions
     else:
         left_pad_amount = (_first_n - first_n)

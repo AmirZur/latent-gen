@@ -3,11 +3,11 @@ python das.py \
     --toy_dataset \
     --layers "6;10" \
     --subspace_dim 64 \
-    --positions "l1" \
+    --positions "f4" \
     --intervention_offset 0 \
     --share_weights \
     --dropout 0 \
-    --num_train_epochs 20 \
+    --num_train_epochs 10 \
     --learning_rate 1e-3 \
     --batch_size 8 \
     --max_seq_length 256 \
