@@ -1,0 +1,15 @@
+{
+  "model_name_or_path": "gpt2",
+  "das_path": "das/gpt2/2024-07-20-11-11-06/weights",
+  "positions": "l1",
+  "share_weights": true,
+  "intervention_offset": 0,
+  "toy_dataset": true,
+  "dataset_split": "train_inclusive",
+  "aspect": "service",
+  "max_new_tokens": 8,
+  "do_sample": false,
+  "temperature": 0.7,
+  "batch_size": 8,
+  "output_dir": "das_eval"
+}
