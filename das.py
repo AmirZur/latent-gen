@@ -236,7 +236,7 @@ def main(
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_name_or_path,
         model_max_length=2048,
-        padding_side="left",
+        padding_side="right",
         use_fast=False,
         trust_remote_code=True
     )
