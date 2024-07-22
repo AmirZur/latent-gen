@@ -1,0 +1,15 @@
+{
+  "model_name_or_path": "inst_tune",
+  "das_path": "das/inst_tune/2024-07-19-10-37-53/weights",
+  "positions": "l1",
+  "share_weights": true,
+  "intervention_offset": 0,
+  "toy_dataset": false,
+  "dataset_split": "train_inclusive",
+  "aspect": "service",
+  "max_new_tokens": 256,
+  "do_sample": false,
+  "temperature": 0.7,
+  "batch_size": 8,
+  "output_dir": "das_eval"
+}
