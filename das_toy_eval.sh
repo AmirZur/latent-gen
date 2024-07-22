@@ -1,6 +1,6 @@
 python das_eval.py \
     --model_name_or_path "gpt2" \
-    --das_path "das/gpt2/2024-07-19-18-16-42/weights" \
+    --das_path "das/gpt2/2024-07-20-11-11-06/weights" \
     --toy_dataset \
     --positions "l1" \
     --share_weights \
