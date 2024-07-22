@@ -89,6 +89,16 @@ class InterventionTrainer(ReftTrainer):
          - source_attention_mask : torch.Tensor
             attention mask of source example + source output
         """
+        if self.tokenizer.padding_side == "left":
+            # shift intervention locations by left padding amount
+            base_padding = inputs["input_ids"].shape[1] - inputs["attention_mask"].sum(dim=1)
+            source_padding = inputs["source_input_ids"].shape[1] - inputs["source_attention_mask"].sum(dim=1)
+            base_intervention_locations = inputs["intervention_locations"] + base_padding[:, None, None]
+            source_intervention_locations = inputs["source_intervention_locations"] + source_padding[:, None, None]
+        else:
+            base_intervention_locations = inputs["intervention_locations"]
+            source_intervention_locations = inputs["source_intervention_locations"]
+
         # run intervened forward pass
         _, cf_outputs = intervenable(
             # base
@@ -103,9 +113,9 @@ class InterventionTrainer(ReftTrainer):
             }],
             unit_locations={"sources->base": (
                 # copy from
-                inputs['source_intervention_locations'].permute(1, 0, 2).tolist(),
+                base_intervention_locations.permute(1, 0, 2).tolist(),
                 # paste to
-                inputs["intervention_locations"].permute(1, 0, 2).tolist()
+                source_intervention_locations.permute(1, 0, 2).tolist()
             )},
             labels=inputs["labels"],
             # for now, always use first subspace partition
