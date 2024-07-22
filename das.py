@@ -362,7 +362,9 @@ def main(
             trainer.save_model(output_dir)
     
     with open(f"{output_dir}/config.json", "w+") as f:
-        json.dump(vars(args), f, indent=2)
+        config = vars(args)
+        config['padding_side'] = tokenizer.padding_side
+        json.dump(config, f, indent=2)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a defensive intervention on AdvBench.")

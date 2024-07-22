@@ -113,9 +113,9 @@ class InterventionTrainer(ReftTrainer):
             }],
             unit_locations={"sources->base": (
                 # copy from
-                base_intervention_locations.permute(1, 0, 2).tolist(),
+                source_intervention_locations.permute(1, 0, 2).tolist(),
                 # paste to
-                source_intervention_locations.permute(1, 0, 2).tolist()
+                base_intervention_locations.permute(1, 0, 2).tolist()
             )},
             labels=inputs["labels"],
             # for now, always use first subspace partition
@@ -162,9 +162,9 @@ class InterventionTrainer(ReftTrainer):
                     }],
                     unit_locations={"sources->base": (
                         # copy from
-                        base_intervention_locations.permute(1, 0, 2).tolist(),
+                        source_intervention_locations.permute(1, 0, 2).tolist(),
                         # paste to
-                        source_intervention_locations.permute(1, 0, 2).tolist()
+                        base_intervention_locations.permute(1, 0, 2).tolist()
                     )},
                     subspaces=0,
                     output_original_output=True,
