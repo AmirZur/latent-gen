@@ -11,6 +11,7 @@ import pyvene as pv
 import pyreft
 import random
 import wandb
+from trl import DPOConfig
 from datasets import Dataset, load_dataset
 from intervention_trainer import make_complex_position_supervised_data_module, InterventionTrainerForCausalLM
 from dpo_reft_trainer import DPOReftTrainer
@@ -287,36 +288,53 @@ def main(
         wandb.init(project="das_cebab", config=vars(args))
         report_to = "wandb"
 
-    training_args = transformers.TrainingArguments(
-        num_train_epochs=num_train_epochs,
-        output_dir=output_dir,
-        per_device_train_batch_size=batch_size,
-        per_device_eval_batch_size=batch_size,
-        learning_rate=learning_rate,
-        logging_steps=logging_steps,
-        remove_unused_columns=False,
-        evaluation_strategy="no",
-        report_to=report_to,
-        warmup_ratio=warmup_ratio,
-        lr_scheduler_type=lr_scheduler_type,
-        max_grad_norm=max_grad_norm,
-        gradient_accumulation_steps=gradient_accumulation_steps,
-        # try to avoid OOM errors
-        dataloader_pin_memory=False
-    )
-
     if use_dpo:
+        training_args = DPOConfig(
+            num_train_epochs=num_train_epochs,
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size,
+            learning_rate=learning_rate,
+            logging_steps=logging_steps,
+            remove_unused_columns=False,
+            evaluation_strategy="no",
+            report_to=report_to,
+            warmup_ratio=warmup_ratio,
+            lr_scheduler_type=lr_scheduler_type,
+            max_grad_norm=max_grad_norm,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            # try to avoid OOM errors
+            dataloader_pin_memory=False,
+            # DPO-specific args
+            beta=beta,
+            max_length=max_seq_length
+            generate_during_eval=False
+        )
         trainer = DPOReftTrainer(
             train_model,
             train_model, # reference model, ignored during training
             tokenizer=tokenizer,
             args=training_args,
-            beta=beta,
-            max_length=max_seq_length,
-            generate_during_eval=False,
             **data_module
         )
     else:
+        training_args = transformers.TrainingArguments(
+            num_train_epochs=num_train_epochs,
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size,
+            learning_rate=learning_rate,
+            logging_steps=logging_steps,
+            remove_unused_columns=False,
+            evaluation_strategy="no",
+            report_to=report_to,
+            warmup_ratio=warmup_ratio,
+            lr_scheduler_type=lr_scheduler_type,
+            max_grad_norm=max_grad_norm,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            # try to avoid OOM errors
+            dataloader_pin_memory=False
+        )
         trainer = pyreft.ReftTrainerForCausalLM(
             model=train_model,
             tokenizer=tokenizer,
