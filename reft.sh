@@ -1,6 +1,6 @@
 python das.py \
     --model_name_or_path "inst_tune" \
-    --layers "10;12;14;16;18;20" \
+    --layers "16;18;20" \
     --rank 8 \
     --positions "f5+l5+d0" \
     --intervention_offset 0 \
@@ -8,7 +8,7 @@ python das.py \
     --dropout 0 \
     --num_train_epochs 5 \
     --learning_rate 1e-3 \
-    --batch_size 8 \
+    --batch_size 16 \
     --max_seq_length 256 \
     --logging_steps 10 \
     --output_dir "reft" \

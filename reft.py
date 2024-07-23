@@ -1,6 +1,5 @@
 import os
 import argparse
-import itertools
 import json
 from tqdm import tqdm
 import torch
@@ -10,11 +9,11 @@ import numpy as np
 import pandas as pd
 import pyvene as pv
 import pyreft
-import yaml
 import random
 import wandb
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from intervention_trainer import make_complex_position_supervised_data_module, InterventionTrainerForCausalLM
+from dpo_reft_trainer import DPOReftTrainer
 
 SEED = 42
 random.seed(SEED)
@@ -53,6 +52,7 @@ def create_dataset(
     dataset_split: str = "train_inclusive",
     aspect: str = "service",
     aspect_value: str = "Positive",
+    use_dpo: bool = False
 ):
     aspect_key = f'{aspect}_aspect_majority'
 
@@ -90,11 +90,12 @@ def create_dataset(
         })
     
     base_inputs = [d['base_input'] for d in data]
+    base_outputs = [d['base_output'] for d in data]
     cf_outputs = [d['cf_output'] for d in data]
     source_inputs = [d['source_input'] for d in data]
     source_outputs = [d['source_output'] for d in data]
 
-    return make_complex_position_supervised_data_module(
+    dataset = make_complex_position_supervised_data_module(
         tokenizer,
         model,
         base_inputs,
@@ -107,6 +108,20 @@ def create_dataset(
         share_weights=share_weights,
         intervention_offset=intervention_offset
     )
+    if not use_dpo:
+        return dataset
+    
+    # parse out intervention locations
+    intervention_locations = dataset['train_dataset']['intervention_locations']
+    train_dataset = Dataset.from_dict({
+        'intervention_locations': intervention_locations,
+        'prompt': base_inputs,
+        'chosen': cf_outputs,
+        'rejected': base_outputs
+    })
+    return {
+        'train_dataset': train_dataset
+    }
 
 def print_trainable_parameters(model):
     if isinstance(model, pyreft.ReftModel):
@@ -137,6 +152,8 @@ def main(
     aspect: str = "service",
     aspect_value: str = "Positive",
     # training args
+    use_dpo: bool = False,
+    beta: float = 0.1,
     num_train_epochs: int = 5,
     learning_rate: float = 1e-3,
     batch_size: int = 10,
@@ -169,6 +186,7 @@ def main(
         f"  aspect: {aspect}\n"
         f"  aspect_value: {aspect_value}\n"
         f"Training args:\n"
+        f"  use_dpo: {use_dpo}\n"
         f"  num_train_epochs: {num_train_epochs}\n"
         f"  learning_rate: {learning_rate}\n"
         f"  batch_size: {batch_size}\n"
@@ -258,7 +276,8 @@ def main(
         dataset_split=dataset_split,
         aspect=aspect,
         intervention_offset=intervention_offset,
-        aspect_value=aspect_value
+        aspect_value=aspect_value,
+        use_dpo=use_dpo
     )
 
     report_to = "none"
@@ -284,12 +303,24 @@ def main(
         dataloader_pin_memory=False
     )
 
-    trainer = pyreft.ReftTrainerForCausalLM(
-        model=train_model,
-        tokenizer=tokenizer,
-        args=training_args,
-        **data_module
-    )
+    if use_dpo:
+        trainer = DPOReftTrainer(
+            train_model,
+            train_model, # reference model, ignored during training
+            tokenizer=tokenizer,
+            args=training_args,
+            beta=beta,
+            max_length=max_seq_length,
+            generate_during_eval=False,
+            **data_module
+        )
+    else:
+        trainer = pyreft.ReftTrainerForCausalLM(
+            model=train_model,
+            tokenizer=tokenizer,
+            args=training_args,
+            **data_module
+        )
     trainer.train()
     
     # create run ID from timestamp
@@ -322,11 +353,12 @@ if __name__ == "__main__":
     parser.add_argument("--dropout", type=float, default=0.)
     parser.add_argument("--intervention_offset", type=int, default=0)
     # dataset args
-    parser.add_argument("--toy_dataset", action="store_true")
     parser.add_argument("--dataset_split", type=str, default="train_inclusive")
     parser.add_argument("--aspect", type=str, default="service")
     parser.add_argument("--aspect_value", type=str, default="Positive")
     # training args
+    parser.add_argument("--use_dpo", action="store_true")
+    parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--num_train_epochs", type=int, default=5)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--batch_size", type=int, default=10)
