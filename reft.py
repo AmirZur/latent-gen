@@ -243,6 +243,10 @@ def main(
             "component": component,
             "low_rank_dimension": rank,
             "embed_dim": model.config.hidden_size,
+            "intervention": pyreft.LoreftIntervention(
+                embed_dim=model.config.hidden_size,
+                low_rank_dimension=rank
+            )
         }
     
     if layers == "all":
@@ -257,8 +261,7 @@ def main(
 
     # get train model (reft or lora)
     reft_config = pv.IntervenableConfig(
-        representations=representations,
-        intervention_types=pyreft.LoreftIntervention
+        representations=representations
     )
     train_model = pyreft.get_reft_model(model, reft_config)
     train_model.set_device(device)
