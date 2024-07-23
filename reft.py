@@ -307,7 +307,7 @@ def main(
             dataloader_pin_memory=False,
             # DPO-specific args
             beta=beta,
-            max_length=max_seq_length
+            max_length=max_seq_length,
             generate_during_eval=False
         )
         trainer = DPOReftTrainer(
