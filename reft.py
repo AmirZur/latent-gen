@@ -242,7 +242,6 @@ def main(
         return {
             "component": component,
             "low_rank_dimension": rank,
-            "embed_dim": model.config.hidden_size,
             "intervention": pyreft.LoreftIntervention(
                 embed_dim=model.config.hidden_size,
                 low_rank_dimension=rank
