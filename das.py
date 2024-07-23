@@ -365,7 +365,11 @@ def main(
             share_weights=share_weights,
             dataset_split=dataset_split,
             aspect=aspect,
-            intervention_offset=intervention_offset
+            intervention_offset=intervention_offset,
+            num_sources_per_cf=num_sources_per_cf,
+            binary=binary,
+            keyword_match=keyword_match,
+            keyword_match_first=keyword_match_first
         )
 
     report_to = "none"
