@@ -2,7 +2,7 @@ python das.py \
     --model_name_or_path "inst_tune" \
     --layers "10;12;14;16;18;20" \
     --rank 8 \
-    --positions "f5+l5" \
+    --positions "f5+l5+d0" \
     --intervention_offset 0 \
     --share_weights \
     --dropout 0 \
