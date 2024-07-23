@@ -147,9 +147,10 @@ def create_dataset(
             if keyword_match:
                 # split input-output by last matching keyword (where the input contains the keyword)
                 def split_by_keyword(tokens, keywords, first=False):
+                    # ignore case when matching keywords (shouldn't affect indices)
                     keyword_indices = [
-                        tokens.find(k) + len(k) for k in keywords if k in tokens
-                        if tokens.find(k) != -1
+                        tokens.lower().find(k) + len(k) for k in keywords if k in tokens
+                        if tokens.lower().find(k) != -1
                     ]
                     assert keyword_indices, f"No {aspect}-aspect keywords found in {tokens}"
                     split_index = min(keyword_indices) if first else max(keyword_indices)
