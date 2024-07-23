@@ -128,6 +128,8 @@ def create_dataset(
         # skip instances where the aspect is not edited to the goal
         if cf[aspect_key] != cf['edit_goal']:
             continue
+        if keyword_match and not any(k in cf['description'].lower() for k in ASPECT_KEYWORDS[aspect]):
+            continue
 
         original_id = cf['original_id'] + '000000' if cf['original_id'] != '0' else '0'
         base = df[df['id'] == original_id]
