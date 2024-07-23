@@ -1,4 +1,4 @@
-python das.py \
+python reft.py \
     --model_name_or_path "inst_tune" \
     --layers "10;12;14;16;18;20" \
     --rank 8 \
