@@ -6,7 +6,8 @@ python das_eval.py \
     --share_weights \
     --intervention_offset $2 \
     --dataset_split "train_inclusive" \
-    --output_dir "das_eval"
+    --output_dir "das_eval" \
+    --binary
 
 # random sampling
 python das_eval.py \
@@ -18,4 +19,5 @@ python das_eval.py \
     --do_sample \
     --temperature 0.7 \
     --dataset_split "train_inclusive" \
-    --output_dir "das_eval"
+    --output_dir "das_eval" \
+    --binary

@@ -23,6 +23,10 @@ torch.manual_seed(SEED)
 
 DATASET_NAME = "CEBaB/CEBaB"
 
+ASPECT_KEYWORDS = {
+    'service': ['waiter', 'waitress', 'service', 'staff', 'server', 'host', 'hostess', 'reservation', 'wait']
+}
+
 ASSISTANT_PREFIX = '<|assistant|>\n'
 
 PROMPT_TEMPLATE = """Write a short restaurant review for the following restaurant:
@@ -102,7 +106,11 @@ def create_dataset(
     share_weights: bool = True,
     intervention_offset: int = 0,
     dataset_split: str = "train_inclusive",
-    aspect: str = "service"
+    aspect: str = "service",
+    num_sources_per_cf: int = 10,
+    binary: bool = False,
+    keyword_match: bool = False,
+    keyword_match_first: bool = True
 ):
     aspect_key = f'{aspect}_aspect_majority'
 
@@ -111,28 +119,68 @@ def create_dataset(
     edit_dataset = train_dataset.filter(lambda x: x['edit_type'] == aspect)
 
     df = pd.DataFrame(train_dataset)
+    if binary:
+        df = df[df[aspect_key].isin(['Positive', 'Negative'])]
+    if keyword_match:
+        df = df[df['description'].apply(lambda x: any(k in x.lower() for k in ASPECT_KEYWORDS[aspect]))]
 
     data = []
     for cf in tqdm(edit_dataset):
-        source = df[df[aspect_key] == cf['edit_goal']].sample().iloc[0]
+        # skip instances where the aspect is not edited to the goal
+        if cf[aspect_key] != cf['edit_goal']:
+            continue
+        if keyword_match and not any(k in cf['description'].lower() for k in ASPECT_KEYWORDS[aspect]):
+            continue
+
         original_id = cf['original_id'] + '000000' if cf['original_id'] != '0' else '0'
-        base = df[df['id'] == original_id].iloc[0]
+        base = df[df['id'] == original_id]
+        # skip instances where we can't find the original description (might be due to keyword filtering)
+        if base.shape[0] == 0:
+            continue
+        base = base.iloc[0]
+        sources = df[df[aspect_key] == cf[aspect_key]]
+        if sources.shape[0] > num_sources_per_cf:
+            sources = sources.sample(num_sources_per_cf, replace=False)
+        
+        for _, source in sources.iterrows():
+            source_tokens = tokenizer.apply_chat_template(source['messages'], tokenize=False)
+            base_tokens = tokenizer.apply_chat_template(base['messages'], tokenize=False)
+            cf_tokens = tokenizer.apply_chat_template(cf['messages'], tokenize=False)
 
-        source_tokens = tokenizer.apply_chat_template(source['messages'], tokenize=False)
-        base_tokens = tokenizer.apply_chat_template(base['messages'], tokenize=False)
-        cf_tokens = tokenizer.apply_chat_template(cf['messages'], tokenize=False)
+            if keyword_match:
+                # split input-output by last matching keyword (where the input contains the keyword)
+                def split_by_keyword(tokens, keywords, first=False):
+                    # ignore case when matching keywords (shouldn't affect indices)
+                    keyword_indices = [
+                        tokens.lower().find(k) + len(k) for k in keywords if k in tokens.lower()
+                    ]
+                    assert keyword_indices, f"No {aspect}-aspect keywords found in {tokens}"
+                    split_index = min(keyword_indices) if first else max(keyword_indices)
+                    return tokens[:split_index], tokens[split_index:]
+                base_inputs, base_outputs = split_by_keyword(
+                    base_tokens, ASPECT_KEYWORDS[aspect], first=keyword_match_first
+                )
+                _, cf_outputs = split_by_keyword(
+                    cf_tokens, ASPECT_KEYWORDS[aspect], first=keyword_match_first
+                )
+                source_inputs, source_outputs = split_by_keyword(
+                    source_tokens, ASPECT_KEYWORDS[aspect], first=keyword_match_first
+                )
+            else:
+                # split input-output by assistant prefix
+                base_inputs, base_outputs = base_tokens.split(ASSISTANT_PREFIX)
+                base_inputs = base_inputs + ASSISTANT_PREFIX
+                _, cf_outputs = cf_tokens.split(ASSISTANT_PREFIX) # same inputs as base
+                source_inputs, source_outputs = source_tokens.split(ASSISTANT_PREFIX)
+                source_inputs = source_inputs + ASSISTANT_PREFIX
 
-        base_inputs, base_outputs = base_tokens.split(ASSISTANT_PREFIX)
-        _, cf_outputs = cf_tokens.split(ASSISTANT_PREFIX) # same inputs as base
-        source_inputs, source_outputs = source_tokens.split(ASSISTANT_PREFIX)
-
-        data.append({
-            'base_input': base_inputs + ASSISTANT_PREFIX,
-            'base_output': base_outputs,
-            'cf_output': cf_outputs,
-            'source_input': source_inputs + ASSISTANT_PREFIX,
-            'source_output': source_outputs
-        })
+            data.append({
+                'base_input': base_inputs,
+                'base_output': base_outputs,
+                'cf_output': cf_outputs,
+                'source_input': source_inputs,
+                'source_output': source_outputs
+            })
     
     base_inputs = [d['base_input'] for d in data]
     cf_outputs = [d['cf_output'] for d in data]
@@ -179,6 +227,9 @@ def main(
     toy_dataset: bool = False,
     dataset_split: str = "train_inclusive",
     aspect: str = "service",
+    binary: bool = False,
+    keyword_match: bool = False,
+    keyword_match_first: bool = True,
     # generation args
     max_new_tokens: int = 256,
     do_sample: bool = False,
@@ -202,6 +253,9 @@ def main(
         f"  toy_dataset: {toy_dataset}\n"
         f"  dataset_split: {dataset_split}\n"
         f"  aspect: {aspect}\n"
+        f"  binary: {binary}\n"
+        f"  keyword_match: {keyword_match}\n"
+        f"  keyword_match_first: {keyword_match_first}\n"
         f"Generation args:\n"
         f"  max_new_tokens: {max_new_tokens}\n"
         f"  do_sample: {do_sample}\n"
@@ -276,7 +330,10 @@ def main(
             share_weights=share_weights,
             dataset_split=dataset_split,
             aspect=aspect,
-            intervention_offset=intervention_offset
+            intervention_offset=intervention_offset,
+            binary=binary,
+            keyword_match=keyword_match,
+            keyword_match_first=keyword_match_first
         )
 
     training_args = transformers.TrainingArguments(
@@ -323,6 +380,9 @@ if __name__ == "__main__":
     parser.add_argument("--toy_dataset", action="store_true")
     parser.add_argument("--dataset_split", type=str, default="train_inclusive")
     parser.add_argument("--aspect", type=str, default="service")
+    parser.add_argument("--binary", action="store_true")
+    parser.add_argument("--keyword_match", action="store_true")
+    parser.add_argument("--keyword_match_first", action="store_true")
     # generation args
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--do_sample", action="store_true")
