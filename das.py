@@ -168,14 +168,16 @@ def create_dataset(
             else:
                 # split input-output by assistant prefix
                 base_inputs, base_outputs = base_tokens.split(ASSISTANT_PREFIX)
+                base_inputs = base_inputs + ASSISTANT_PREFIX
                 _, cf_outputs = cf_tokens.split(ASSISTANT_PREFIX) # same inputs as base
                 source_inputs, source_outputs = source_tokens.split(ASSISTANT_PREFIX)
+                source_inputs = source_inputs + ASSISTANT_PREFIX
 
             data.append({
-                'base_input': base_inputs + ASSISTANT_PREFIX,
+                'base_input': base_inputs,
                 'base_output': base_outputs,
                 'cf_output': cf_outputs,
-                'source_input': source_inputs + ASSISTANT_PREFIX,
+                'source_input': source_inputs,
                 'source_output': source_outputs
             })
     
