@@ -46,7 +46,10 @@ def main(
         device_map=device,
         trust_remote_code=True
     )
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path,
+        padding_side="right"
+    )
     if not tokenizer.pad_token_id:
         tokenizer.pad_token = tokenizer.eos_token
 
