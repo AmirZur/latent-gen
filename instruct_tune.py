@@ -44,7 +44,8 @@ def main(
         model_name_or_path,
         torch_dtype=torch.bfloat16,
         device_map=device,
-        trust_remote_code=True
+        trust_remote_code=True,
+        attn_implementation="flash_attention_2"
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path,
