@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import json
 import random
 import os
@@ -18,16 +19,21 @@ Price tier: {price_tier}
 Dining style: {dining_style}
 Region: {region}"""
 
-def create_example(example, prefill_generation=False):
+def create_example(tokenizer, example, prefill_generation=False):
     # convert string to dict (VERY UNSAFE, DO NOT USE ON UNTRUSTED DATA)
     metadata = eval(example['opentable_metadata'])
     prompt = PROMPT_TEMPLATE.format(**metadata)
     messages = [
         {'role': 'user', 'content': prompt},
     ]
+    inputs = tokenizer.apply_chat_template(
+        messages, 
+        tokenize=False,
+        add_generation_prompt=True,
+    )
     if prefill_generation:
-        messages.append({'role': 'assistant', 'content': example['prefix']})
-    return messages
+        inputs += example['prefix']
+    return inputs
 
 def get_original(df, example):
     original_id = example['original_id'] + '000000' if example['original_id'] != '0' else '0'
@@ -86,17 +92,16 @@ def main(
     generations = []
     for b in trange(0, len(df), batch_size, desc="Generating..."):
         batch = df.iloc[b:b+batch_size].to_dict(orient="records")
-        examples = [create_example(example, prefill_generation=prefill_generation) for example in batch]
-        inputs = tokenizer.apply_chat_template(
+        examples = [create_example(tokenizer, example, prefill_generation=prefill_generation) for example in batch]
+        inputs = tokenizer(
             examples,
             return_tensors="pt",
-            add_generation_prompt=not prefill_generation, # prefill generation already adds the prompt
             padding=True,
             truncation=True
         ).to(device)
         with torch.no_grad():
             outputs = model.generate(
-                input_ids=inputs, 
+                **inputs, 
                 max_new_tokens=max_new_tokens, 
                 pad_token_id=tokenizer.eos_token_id,
                 num_return_sequences=num_generations_per_example,
@@ -108,8 +113,26 @@ def main(
     df = pd.DataFrame(data)
     df['generation'] = generations
 
+    run_id = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    output_dir = os.path.join(output_dir, run_id)
+
     os.makedirs(output_dir, exist_ok=True)
     df.to_csv(os.path.join(output_dir, "generations.csv"), index=False)
+
+    with open(os.path.join(output_dir, "config.json"), "w+") as f:
+        config = {
+            "model_name_or_path": model_name_or_path,
+            "output_dir": output_dir,
+            "num_generations_per_example": num_generations_per_example,
+            "batch_size": batch_size,
+            "max_new_tokens": max_new_tokens,
+            "prefill_generation": prefill_generation,
+            "aspect": aspect,
+            "use_flash_attention": use_flash_attention,
+            "padding_side": tokenizer.padding_side,
+            **generate_kwargs
+        }
+        json.dump(config, f, indent=2)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
