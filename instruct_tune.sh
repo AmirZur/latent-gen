@@ -9,4 +9,5 @@ python instruct_tune.py \
     --logging_dir "logs" \
     --logging_steps 10 \
     --max_seq_length 256 \
-    --save_model
+    --save_model \
+    --use_wandb

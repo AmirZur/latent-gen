@@ -1,5 +1,6 @@
 import argparse
 import torch
+import wandb
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
@@ -33,7 +34,9 @@ def main(
     logging_dir: str = "logs",
     logging_steps: int = 100,
     max_seq_length: int = 128,
-    save_model: bool = False
+    save_model: bool = False,
+    use_wandb: bool = False,
+    args: argparse.Namespace = None
 ):
     # Load the model and tokenizer
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -51,6 +54,11 @@ def main(
     train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
     train_dataset = train_dataset.map(create_example, remove_columns=train_dataset.features)
 
+    report_to = []
+    if use_wandb:
+        wandb.init(project="cebab_instruct_tune", config=vars(args))
+        report_to = "wandb"
+
     # Set up trainer
     sft_config = SFTConfig(
         output_dir=output_dir,
@@ -61,7 +69,7 @@ def main(
         logging_dir=logging_dir,
         logging_steps=logging_steps,
         max_seq_length=max_seq_length,
-        report_to=[],
+        report_to=report_to,
         save_strategy="no"
     )
 
@@ -92,5 +100,6 @@ if __name__ == "__main__":
     parser.add_argument("--logging_steps", type=int, default=100)
     parser.add_argument("--max_seq_length", type=int, default=128)
     parser.add_argument("--save_model", action="store_true")
+    parser.add_argument("--use_wandb", action="store_true")
     args = parser.parse_args()
-    main(**vars(args))
+    main(**vars(args), args=args)
