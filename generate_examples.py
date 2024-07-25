@@ -25,7 +25,7 @@ def create_example(example):
     messages = [
         {'role': 'user', 'content': prompt},
     ]
-    return {'messages': messages}
+    return messages
 
 def main(
     model_name_or_path: str = "inst_tune",
@@ -34,6 +34,7 @@ def main(
     batch_size: int = 8,
     max_new_tokens: int = 256,
     dataset_split: str = "train_observational",
+    use_flash_attention: bool = True,
     **generate_kwargs
 ):
     # Load the model and tokenizer
@@ -43,9 +44,12 @@ def main(
         torch_dtype=torch.bfloat16,
         device_map=device,
         trust_remote_code=True,
-        attn_implementation="flash_attention_2"
+        attn_implementation="flash_attention_2" if use_flash_attention else None
     )
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path,
+        padding_side="left"
+    )
     if not tokenizer.pad_token_id:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -63,7 +67,9 @@ def main(
         inputs = tokenizer.apply_chat_template(
             examples,
             return_tensors="pt",
-            add_generation_prompt=True
+            add_generation_prompt=True,
+            padding=True,
+            truncation=True
         ).to(device)
         with torch.no_grad():
             outputs = model.generate(
@@ -90,6 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--dataset_split", type=str, default="train_observational")
+    parser.add_argument("--use_flash_attention", action="store_true")
     # generation arguments
     parser.add_argument("--do_sample", action="store_true")
     parser.add_argument("--temperature", type=float, default=0.7)
