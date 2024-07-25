@@ -18,14 +18,29 @@ Price tier: {price_tier}
 Dining style: {dining_style}
 Region: {region}"""
 
-def create_example(example):
+def create_example(example, prefill_generation=False):
     # convert string to dict (VERY UNSAFE, DO NOT USE ON UNTRUSTED DATA)
     metadata = eval(example['opentable_metadata'])
     prompt = PROMPT_TEMPLATE.format(**metadata)
     messages = [
         {'role': 'user', 'content': prompt},
     ]
+    if prefill_generation:
+        messages.append({'role': 'assistant', 'content': example['prefix']})
     return messages
+
+def get_original(df, example):
+    original_id = example['original_id'] + '000000' if example['original_id'] != '0' else '0'
+    base = df[df['id'] == original_id]
+    assert base.shape[0] == 1
+    base = base.iloc[0]
+    return base['description']
+
+def get_prefix(example):
+    for i in range(min(len(example['original_description']), len(example['description']))):
+        if example['original_description'][i] != example['description'][i]:
+            break
+    return example['original_description'][:i]
 
 def main(
     model_name_or_path: str = "inst_tune",
@@ -33,7 +48,8 @@ def main(
     num_generations_per_example: int = 10,
     batch_size: int = 8,
     max_new_tokens: int = 256,
-    dataset_split: str = "train_observational",
+    prefill_generation: bool = False,
+    aspect: str = "service",
     use_flash_attention: bool = True,
     **generate_kwargs
 ):
@@ -54,20 +70,27 @@ def main(
         tokenizer.pad_token = tokenizer.eos_token
 
     # Load the dataset
-    train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
-    df = pd.DataFrame(train_dataset)
-    df['restaurant_id'] = df['opentable_metadata'].map(lambda x: eval(x)['restaurant_id'])
-    df = df.drop_duplicates(subset='restaurant_id').reset_index(drop=True)
+    if prefill_generation:
+        train_dataset = load_dataset("CEBaB/CEBaB", split="train_inclusive")
+        original_df = pd.DataFrame(train_dataset)
+        df = original_df[original_df['edit_type'] == aspect].copy()
+        df['original_description'] = df.apply(lambda x: get_original(original_df, x), axis=1)
+        df['prefix'] = df.apply(get_prefix, axis=1)
+    else:
+        train_dataset = load_dataset("CEBaB/CEBaB", split="train_observational")
+        df = pd.DataFrame(train_dataset)
+        df['restaurant_id'] = df['opentable_metadata'].map(lambda x: eval(x)['restaurant_id'])
+        df = df.drop_duplicates(subset='restaurant_id').reset_index(drop=True)
 
     data = []
     generations = []
     for b in trange(0, len(df), batch_size, desc="Generating..."):
         batch = df.iloc[b:b+batch_size].to_dict(orient="records")
-        examples = [create_example(example) for example in batch]
+        examples = [create_example(example, prefill_generation=prefill_generation) for example in batch]
         inputs = tokenizer.apply_chat_template(
             examples,
             return_tensors="pt",
-            add_generation_prompt=True,
+            add_generation_prompt=not prefill_generation, # prefill generation already adds the prompt
             padding=True,
             truncation=True
         ).to(device)
@@ -94,8 +117,9 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="inst_gens")
     parser.add_argument("--num_generations_per_example", type=int, default=10)
     parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--prefill_generation", action="store_true")
+    parser.add_argument("--aspect", type=str, default="service")
     parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--dataset_split", type=str, default="train_observational")
     parser.add_argument("--use_flash_attention", action="store_true")
     # generation arguments
     parser.add_argument("--do_sample", action="store_true")
