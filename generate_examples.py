@@ -183,12 +183,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", type=str, default="inst_tune")
     parser.add_argument("--output_dir", type=str, default="inst_gens")
+    parser.add_argument("--dataset_split", type=str, default="train_inclusive")
     parser.add_argument("--num_generations_per_example", type=int, default=10)
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--prefill_generation", action="store_true")
     parser.add_argument("--aspect", type=str, default="service")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--use_flash_attention", action="store_true")
+    # post-processing arguments
+    parser.add_argument("--assistant_prefix", type=str, default="<|assistant|>")
+    parser.add_argument("--assistant_suffix", type=str, default="<|end|>")
+    # classification arguments
+    parser.add_argument("--classifier_name_or_path", type=str, default="train_classifier")
     # generation arguments
     parser.add_argument("--do_sample", action="store_true")
     parser.add_argument("--temperature", type=float, default=0.7)
