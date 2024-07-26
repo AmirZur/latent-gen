@@ -6,7 +6,7 @@ import os
 import torch
 from tqdm import trange
 import pandas as pd
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 from datasets import load_dataset
 
 SEED = 42
@@ -18,6 +18,8 @@ Cuisine: {cuisine}
 Price tier: {price_tier}
 Dining style: {dining_style}
 Region: {region}"""
+
+LABELS = ['Negative', 'Positive', 'unknown']
 
 def create_example(tokenizer, example, prefill_generation=False):
     # convert string to dict (VERY UNSAFE, DO NOT USE ON UNTRUSTED DATA)
@@ -51,14 +53,24 @@ def get_prefix(example):
 def main(
     model_name_or_path: str = "inst_tune",
     output_dir: str = "inst_gens",
+    dataset_split: str = "train_inclusive",
     num_generations_per_example: int = 10,
     batch_size: int = 8,
     max_new_tokens: int = 256,
     prefill_generation: bool = False,
     aspect: str = "service",
     use_flash_attention: bool = True,
+    # post-processing arguments
+    assistant_prefix: str = "<|assistant|>",
+    assistant_suffix: str = "<|end|>",
+    # classification arguments
+    classifier_name_or_path: str = "train_classifier",
     **generate_kwargs
 ):
+    #######################
+    # Generate examples   #
+    #######################
+    print('Generating examples...')
     # Load the model and tokenizer
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModelForCausalLM.from_pretrained(
@@ -76,14 +88,13 @@ def main(
         tokenizer.pad_token = tokenizer.eos_token
 
     # Load the dataset
+    train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
     if prefill_generation:
-        train_dataset = load_dataset("CEBaB/CEBaB", split="train_inclusive")
         original_df = pd.DataFrame(train_dataset)
         df = original_df[original_df['edit_type'] == aspect].copy()
         df['original_description'] = df.apply(lambda x: get_original(original_df, x), axis=1)
         df['prefix'] = df.apply(get_prefix, axis=1)
     else:
-        train_dataset = load_dataset("CEBaB/CEBaB", split="train_observational")
         df = pd.DataFrame(train_dataset)
         df['restaurant_id'] = df['opentable_metadata'].map(lambda x: eval(x)['restaurant_id'])
         df = df.drop_duplicates(subset='restaurant_id').reset_index(drop=True)
@@ -112,6 +123,40 @@ def main(
     
     df = pd.DataFrame(data)
     df['generation'] = generations
+
+    #########################
+    # Classify examples     #
+    #########################
+    print('Classifying examples...')
+    # delete model and tokenizer to free up memory
+    del model, tokenizer
+    torch.cuda.empty_cache()
+
+    tokenizer = AutoTokenizer.from_pretrained(classifier_name_or_path)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForSequenceClassification.from_pretrained(
+        classifier_name_or_path,
+        device_map=device
+    )
+    if model.config.pad_token_id is None:
+        model.config.pad_token_id = tokenizer.pad_token_id
+
+    df['text'] = df['generation'].map(
+        lambda x: x.split(assistant_prefix)[1].split(assistant_suffix)[0].strip()
+    )
+
+    predictions = []
+    for b in trange(0, df.shape[0], batch_size):
+        batch = df.iloc[b:b+batch_size]
+        examples = batch['text'].tolist()
+        inputs = tokenizer(examples, padding=True, truncation=True, return_tensors='pt').to(device)
+        outputs = model(**inputs)
+        predictions += outputs.logits.argmax(dim=1).tolist()
+
+    df[f'{aspect}_labels'] = [LABELS[p] for p in predictions]
 
     run_id = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     output_dir = os.path.join(output_dir, run_id)
