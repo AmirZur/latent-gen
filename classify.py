@@ -1,4 +1,5 @@
 import argparse
+from typing import Optional
 from tqdm import trange
 import pandas as pd
 import torch
@@ -12,7 +13,7 @@ LABELS = ['Negative', 'Positive', 'unknown']
 def main(
     model_name_or_path: str = "train_classifier",
     examples_path: str = "inst_gens/generations.csv",
-    output_path: str = None,
+    output_path: Optional[str] = None,
     batch_size: int = 8,
     aspect: str = "service",
 ):
@@ -33,8 +34,8 @@ def main(
     predictions = []
     for b in trange(0, df.shape[0], batch_size):
         batch = df.iloc[b:b+batch_size]
-        descriptions = batch['description'].tolist()
-        inputs = tokenizer(descriptions, padding=True, truncation=True, return_tensors='pt').to(device)
+        examples = batch['generation'].tolist()
+        inputs = tokenizer(examples, padding=True, truncation=True, return_tensors='pt').to(device)
         outputs = model(**inputs)
         predictions += outputs.logits.argmax(dim=1).tolist()
 
