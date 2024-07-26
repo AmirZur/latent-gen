@@ -107,9 +107,7 @@ def main(
                 num_return_sequences=num_generations_per_example,
                 **generate_kwargs
             )
-            # skip input tokens
-            outputs = outputs[:, inputs['input_ids'].shape[1]:]
-            generations += tokenizer.batch_decode(outputs, skip_special_tokens=True)
+            generations += tokenizer.batch_decode(outputs)
             data += [b for b in batch for _ in range(num_generations_per_example)]
     
     df = pd.DataFrame(data)
