@@ -47,7 +47,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", type=str, default="microsoft/Phi-3-mini-4k-instruct")
+    parser.add_argument("--model_name_or_path", type=str, default="train_classifier")
     parser.add_argument("--examples_path", type=str, default="inst_gens/generations.csv")
     parser.add_argument("--output_path", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=8)
