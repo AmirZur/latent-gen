@@ -1,0 +1,13 @@
+{
+  "model_name_or_path": "inst_tune",
+  "output_dir": "inst_gens/2024-07-26-11-25-18",
+  "num_generations_per_example": 10,
+  "batch_size": 8,
+  "max_new_tokens": 256,
+  "prefill_generation": false,
+  "aspect": "service",
+  "use_flash_attention": true,
+  "padding_side": "right",
+  "do_sample": true,
+  "temperature": 0.7
+}
