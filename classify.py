@@ -16,6 +16,8 @@ def main(
     output_path: Optional[str] = None,
     batch_size: int = 8,
     aspect: str = "service",
+    assistant_prefix: str = "<|assistant|>",
+    assistant_suffix: str = "<|end|>",
 ):
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     if tokenizer.pad_token_id is None:
@@ -30,11 +32,14 @@ def main(
         model.config.pad_token_id = tokenizer.pad_token_id
 
     df = pd.read_csv(examples_path)
+    df['text'] = df['generation'].map(
+        lambda x: x.split(assistant_prefix)[1].split(assistant_suffix)[0].strip()
+    )
 
     predictions = []
     for b in trange(0, df.shape[0], batch_size):
         batch = df.iloc[b:b+batch_size]
-        examples = batch['generation'].tolist()
+        examples = batch['text'].tolist()
         inputs = tokenizer(examples, padding=True, truncation=True, return_tensors='pt').to(device)
         outputs = model(**inputs)
         predictions += outputs.logits.argmax(dim=1).tolist()
