@@ -1,6 +1,6 @@
 {
   "model_name_or_path": "inst_tune",
-  "output_dir": "inst_gens/2024-07-25-17-28-15",
+  "output_dir": "inst_gens/2024-07-25-18-49-21",
   "num_generations_per_example": 10,
   "batch_size": 8,
   "max_new_tokens": 256,
