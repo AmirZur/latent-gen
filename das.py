@@ -217,6 +217,7 @@ def print_trainable_parameters(model):
 def main(
     # pyvene args
     model_name_or_path: str = "llama2_7b", # from models.yaml
+    use_flash_attention: bool = False,
     layers: str = "18;28",
     subspace_dim: int = 128,
     rank: int = 4,
@@ -285,7 +286,8 @@ def main(
         model_name_or_path,
         torch_dtype=torch.bfloat16,
         device_map=device,
-        trust_remote_code=True
+        trust_remote_code=True,
+        attn_implementation="flash_attention_2" if use_flash_attention else None
     )
     # get tokenizer
     tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -429,6 +431,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a defensive intervention on AdvBench.")
     # das args
     parser.add_argument("--model_name_or_path", type=str, default="llama2_7b")
+    parser.add_argument("--use_flash_attention", action="store_true")
     parser.add_argument("--layers", type=str, default="18;28")
     parser.add_argument("--subspace_dim", type=int, default=128)
     parser.add_argument("--rank", type=int, default=4)
