@@ -54,7 +54,7 @@ def main(
             # check if the number of generations is correct
             if des_df.shape[0] != num_generations_per_example:
                 continue
-            most_common = Counter(des_df['service_labels']).most_common(1)[0]
+            most_common = Counter(des_df['service_label']).most_common(1)[0]
             data.append({
                 **des_df.iloc[0].to_dict(), # use the first row to get the metadata
                 'label': most_common[0],
@@ -124,8 +124,8 @@ def main(
 
     train_activations = get_activations(train_dataset)
     validation_activations = get_activations(validation_dataset)
-    train_labels = train_dataset['most_common'].to_numpy()
-    validation_labels = validation_dataset['most_common'].to_numpy()
+    train_labels = train_dataset['label'].to_numpy()
+    validation_labels = validation_dataset['label'].to_numpy()
 
     #####################
     # Train probes      #
@@ -156,10 +156,9 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", type=str, default="inst_tune")
-    parser.add_argument("--classifier_name_or_path", type=str, default="classifier_train")
     parser.add_argument("--use_flash_attention", action="store_true")
-    parser.add_argument("--train_path", type=str, default="inst_gens/generations.csv")
-    parser.add_argument("--validation_path", type=str, default="inst_gens/generations.csv")
+    parser.add_argument("--train_path", type=str, default="inst_tune/eval/train/generations.csv")
+    parser.add_argument("--validation_path", type=str, default="inst_tune/eval/validation/generations.csv")
     parser.add_argument("--num_generations_per_example", type=int, default=10)
     parser.add_argument("--remove_correct_prefixes", action="store_true")
     parser.add_argument("--count_threshold", type=int, default=5)
