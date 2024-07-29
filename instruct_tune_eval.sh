@@ -4,7 +4,7 @@ python instruct_tune.py \
     --model_name_or_path "inst_tune/train" \
     --use_flash_attention \
     --prompt_with_example \
-    --eval_split "validation" \
+    --eval_split "train_inclusive" \
     --output_dir "inst_tune" \
     --per_device_eval_batch_size 8 \
     --prefill_generation \
