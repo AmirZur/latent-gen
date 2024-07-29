@@ -1,5 +1,6 @@
 import argparse
 from functools import partial
+import os
 from typing import List
 from tqdm import trange
 from collections import Counter
@@ -37,7 +38,7 @@ def main(
     prefix_length_threshold: int = -1,
     # probe arguments
     num_tokens_from_end: int = 5,
-    output_path: str = "probe/scores.csv",
+    output_dir: str = "probe",
 ):
     #####################
     # Load data         #
@@ -151,7 +152,8 @@ def main(
             })
     
     score_df = pd.DataFrame(score_data)
-    score_df.to_csv(output_path, index=False)
+    os.makedirs(output_dir, exist_ok=True)
+    score_df.to_csv(f"{output_dir}/probe_scores.csv", index=False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -165,6 +167,6 @@ if __name__ == "__main__":
     parser.add_argument("--categories", nargs='+', default=['Negative', 'Positive', 'unknown'])
     parser.add_argument("--prefix_length_threshold", type=int, default=0)
     parser.add_argument("--num_tokens_from_end", type=int, default=5)
-    parser.add_argument("--output_path", type=str, default="probe/scores.csv")
+    parser.add_argument("--output_dir", type=str, default="probe")
     args = parser.parse_args()
     main(**vars(args))
