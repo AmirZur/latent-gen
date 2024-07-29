@@ -1,10 +1,12 @@
 python instruct_tune.py \
     --do_eval \
+    --do_classify \
     --model_name_or_path "inst_tune/train" \
     --use_flash_attention \
     --prompt_with_example \
+    --eval_split "validation" \
     --output_dir "inst_tune" \
-    --per_device_eval_batch_size 32 \
+    --per_device_eval_batch_size 8 \
     --prefill_generation \
     --aspect "service" \
     --max_new_tokens 256 \
