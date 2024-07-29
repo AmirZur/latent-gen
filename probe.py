@@ -1,4 +1,5 @@
 import argparse
+from functools import partial
 from typing import List
 from tqdm import trange
 from collections import Counter
@@ -9,18 +10,27 @@ from transformers import (
     AutoModelForCausalLM,
 )
 from sklearn.linear_model import Perceptron
-
-LABELS = ['Negative', 'Positive', 'unknown']
+from utils import (
+    get_original,
+    get_prefix,
+    create_input, 
+    create_input_with_example,
+    create_input_validation, 
+    LABELS, 
+    SEED, 
+    set_seed
+)
+set_seed(SEED)
 
 def main(
     # model arguments
     model_name_or_path: str = "inst_tune",
-    classifier_name_or_path: str = "classifier_train",
     use_flash_attention: bool = False,
     # data arguments
-    train_path: str = "inst_gens/generations.csv",
-    validation_path: str = "inst_gens/generations.csv",
+    train_path: str = "inst_tune/eval/train/generations.csv",
+    validation_path: str = "inst_tune/eval/validation/generations.csv",
     num_generations_per_example: int = 10,
+    prompt_with_example: bool = False,
     # preprocessing arguments
     remove_correct_prefixes : bool = False,
     count_threshold : int = -1,
@@ -40,37 +50,31 @@ def main(
 
     def preprocess_data(df):
         data = []
-        assert 'prefix' in df.columns, "Only running probe on full prefix for now."
-        df.loc[df['prefix'].isna(), 'prefix'] = ''
         for des in df['description'].unique():
             des_df = df[df['description'] == des]
+            # check if the number of generations is correct
             if des_df.shape[0] != num_generations_per_example:
                 continue
-            assert (des_df.iloc[0]['prefix'] == des_df['prefix']).all(), des_df['prefix']
             most_common = Counter(des_df['service_labels']).most_common(1)[0]
-            prefix_label = des_df.iloc[0]['prefix_labels'] if 'prefix_labels' in des_df.columns else None
             data.append({
-                'description': des,
-                'most_common': most_common[0],
+                **des_df.iloc[0].to_dict(),
+                'label': most_common[0],
                 'count': most_common[1],
-                'prefix': des_df.iloc[0]['prefix'],
-                'generations': des_df['text'].tolist(),
-                'labels': des_df['service_labels'].tolist(),
-                'prefix_label': prefix_label
             })
 
         preprocessed_df = pd.DataFrame(data)
         # remove prefixes that are correct
-        if remove_correct_prefixes:
+        if remove_correct_prefixes and 'prefix_label' in preprocessed_df.columns:
             preprocessed_df = preprocessed_df[
-                preprocessed_df['prefix_label'] != preprocessed_df['most_common']
+                preprocessed_df['prefix_label'] != preprocessed_df['label']
             ]
         # select prefixes that have a count above a threshold
         preprocessed_df = preprocessed_df[preprocessed_df['count'] > count_threshold]
         # select prefixes that have a length above a threshold
-        preprocessed_df = preprocessed_df[preprocessed_df['prefix'].apply(len) > prefix_length_threshold]
+        if 'prefix' in preprocessed_df.columns:
+            preprocessed_df = preprocessed_df[preprocessed_df['prefix'].apply(len) > prefix_length_threshold]
         # select prefixes that have a label in the categories
-        preprocessed_df = preprocessed_df[preprocessed_df['most_common'].isin(categories)]
+        preprocessed_df = preprocessed_df[preprocessed_df['label'].isin(categories)]
 
         return preprocessed_df.reset_index(drop=True)
     
@@ -100,10 +104,19 @@ def main(
     
     def get_activations(dataset, batch_size=8):
         all_activations = None
+        create_input_fn = partial(create_input_with_example, dataset) if prompt_with_example else create_input
         for i in trange(0, len(dataset), batch_size):
-            examples = dataset.iloc[i:i+batch_size]
+            batch = dataset.iloc[i:i+batch_size].to_dict(orient="records")
+            examples = [
+                create_input_validation(
+                    create_input_fn, 
+                    tokenizer, 
+                    example,
+                    model.config.max_length
+                ) for example in batch
+            ]
             inputs = tokenizer(
-                examples['prefix'].tolist(), return_tensors='pt', padding=True, truncation=True
+                examples, return_tensors='pt', padding=True, truncation=True
             ).to(model.device)
             with torch.no_grad():
                 outputs = model(**inputs, output_hidden_states=True)
