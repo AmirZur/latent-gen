@@ -1,8 +1,12 @@
 import argparse
 from functools import partial
+import os
 import random
+from typing import Optional
 import numpy as np
+import pandas as pd
 import torch
+from tqdm import trange
 import wandb
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
@@ -40,6 +44,19 @@ Dining style: {dining_style}
 Region: {region}
 
 Write a review:"""
+
+def get_original(df, example):
+    original_id = example['original_id'] + '000000' if example['original_id'] != '0' else '0'
+    base = df[df['id'] == original_id]
+    assert base.shape[0] == 1
+    base = base.iloc[0]
+    return base['description']
+
+def get_prefix(example):
+    for i in range(min(len(example['original_description']), len(example['description']))):
+        if example['original_description'][i] != example['description'][i]:
+            break
+    return example['original_description'][:i]
 
 def create_input(datapoint):
     # convert string to dict (VERY UNSAFE, DO NOT USE ON UNTRUSTED DATA)
@@ -82,22 +99,73 @@ def create_input_with_example(df, datapoint):
     ]
     return {'messages': messages}
 
+def create_input_validation(
+    create_input_fn, 
+    tokenizer, 
+    example,
+    prefill_generation: bool = False
+):
+    # parse out only first message for validation (no completion)
+    messages = create_input_fn(example)[:1]
+    inputs = tokenizer.apply_chat_template(
+        messages, 
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    if prefill_generation:
+        inputs += example['prefix']
+    return inputs
+
+def create_dataset(
+    prompt_with_example: bool = False,
+    dataset_split: Optional[str] = None
+):
+    # load the dataset (if split is optional, use prompt_with_example to determine which split to use)
+    if dataset_split is None:
+        dataset_split = "train_inclusive" if prompt_with_example else "train_observational"
+    train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
+    train_dataset = train_dataset.filter(
+        lambda d: 
+            d['food_aspect_majority'] not in ['no majority', ''] and \
+            d['service_aspect_majority'] not in ['no majority', ''] and \
+            d['noise_aspect_majority'] not in ['no majority', ''] and \
+            d['ambiance_aspect_majority'] not in ['no majority', '']
+    )
+    train_df = train_dataset.to_pandas()
+    create_input_fn = partial(create_input_with_example, train_df) if prompt_with_example else create_input
+    # preprocess the data
+    train_dataset = train_dataset.map(create_input_fn, remove_columns=train_dataset.features)
+    return train_dataset, create_input_fn
 
 def main(
+    # script arguments
+    do_train: bool = True,
+    do_eval: bool = False,
+    # model arguments
     model_name_or_path: str = "microsoft/Phi-3-mini-4k-instruct",
     use_flash_attention: bool = False,
+    # data arguments
     prompt_with_example: bool = False,
+    # training arguments
     output_dir: str = "inst_tune",
     per_device_train_batch_size: int = 4,
     per_device_eval_batch_size: int = 4,
     num_train_epochs: int = 3,
     learning_rate: float = 1e-5,
+    max_seq_length: int = 128,
+    # logging arguments
     logging_dir: str = "logs",
     logging_steps: int = 100,
-    max_seq_length: int = 128,
     save_model: bool = False,
     use_wandb: bool = False,
-    args: argparse.Namespace = None
+    # eval arguments
+    eval_split: str = "validation",
+    prefill_generation: bool = False,
+    aspect: str = "service",
+    max_new_tokens: int = 256,
+    num_return_sequences: int = 10,
+    args: argparse.Namespace = None,
+    **generate_kwargs
 ):
     # Load the model and tokenizer
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -115,56 +183,96 @@ def main(
     if not tokenizer.pad_token_id:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # load the dataset
-    dataset_split = "train_inclusive" if prompt_with_example else "train_observational"
-    train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
-    train_dataset = train_dataset.filter(
-        lambda d: 
-            d['food_aspect_majority'] not in ['no majority', ''] and \
-            d['service_aspect_majority'] not in ['no majority', ''] and \
-            d['noise_aspect_majority'] not in ['no majority', ''] and \
-            d['ambiance_aspect_majority'] not in ['no majority', '']
-    )
-    train_df = train_dataset.to_pandas()
-    create_input_fn = partial(create_input_with_example, train_df) if prompt_with_example else create_input
-    # preprocess the data
-    train_dataset = train_dataset.map(create_input_fn, remove_columns=train_dataset.features)
+    # Train model
+    if do_train:
+        train_dataset, _ = create_dataset(prompt_with_example)
 
-    report_to = []
-    if use_wandb:
-        wandb.init(project="cebab_instruct_tune", config=vars(args))
-        report_to = "wandb"
+        report_to = []
+        if use_wandb:
+            wandb.init(project="cebab_instruct_tune", config=vars(args))
+            report_to = "wandb"
 
-    # Set up trainer
-    sft_config = SFTConfig(
-        output_dir=output_dir,
-        per_device_train_batch_size=per_device_train_batch_size,
-        per_device_eval_batch_size=per_device_eval_batch_size,
-        num_train_epochs=num_train_epochs,
-        learning_rate=learning_rate,
-        logging_dir=logging_dir,
-        logging_steps=logging_steps,
-        max_seq_length=max_seq_length,
-        report_to=report_to,
-        save_strategy="no"
-    )
+        # Set up trainer
+        sft_config = SFTConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=per_device_train_batch_size,
+            per_device_eval_batch_size=per_device_eval_batch_size,
+            num_train_epochs=num_train_epochs,
+            learning_rate=learning_rate,
+            logging_dir=logging_dir,
+            logging_steps=logging_steps,
+            max_seq_length=max_seq_length,
+            report_to=report_to,
+            save_strategy="no"
+        )
 
-    trainer = SFTTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        args=sft_config,
-        train_dataset=train_dataset
-    )
+        trainer = SFTTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            args=sft_config,
+            train_dataset=train_dataset
+        )
+        trainer.train()
 
-    # Train the model
-    trainer.train()
+        # Save the model
+        if save_model:
+            os.makedirs(f"{output_dir}/eval", exist_ok=True)
+            trainer.save_model(f"{output_dir}/eval")
 
-    # Save the model
-    if save_model:
-        trainer.save_model(output_dir)
+    # Evaluate the model
+    if do_eval:
+        # load eval dataset
+        eval_dataset, create_input_fn = create_dataset(prompt_with_example, eval_split)
+        if prefill_generation:
+            original_df = pd.DataFrame(eval_dataset)
+            df = original_df[original_df['edit_type'] == aspect].copy()
+            df['original_description'] = df.apply(lambda x: get_original(original_df, x), axis=1)
+            df['prefix'] = df.apply(get_prefix, axis=1)
+        else:
+            df = pd.DataFrame(eval_dataset)
+            df['restaurant_id'] = df['opentable_metadata'].map(lambda x: eval(x)['restaurant_id'])
+            df = df.drop_duplicates(subset='restaurant_id').reset_index(drop=True)
+
+        data = []
+        generations = []
+        for b in trange(0, len(df), per_device_eval_batch_size, desc="Generating..."):
+            batch = df.iloc[b:b+per_device_eval_batch_size].to_dict(orient="records")
+            examples = [
+                create_input_validation(
+                    create_input_fn,
+                    tokenizer,
+                    example,
+                    prefill_generation=prefill_generation
+                )
+                for example in batch
+            ]
+            inputs = tokenizer(
+                examples,
+                return_tensors="pt",
+                padding=True,
+                truncation=True
+            ).to(device)
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs, 
+                    max_new_tokens=max_new_tokens, 
+                    pad_token_id=tokenizer.eos_token_id,
+                    num_return_sequences=num_return_sequences,
+                    **generate_kwargs
+                )
+                generations += tokenizer.batch_decode(outputs)
+                data += [b for b in batch for _ in range(num_return_sequences)]
+        df = pd.DataFrame(data)
+        df['generation'] = generations
+
+        # save the generations
+        os.makedirs(f"{output_dir}/eval", exist_ok=True)
+        df.to_csv(f"{output_dir}/eval/generations.csv", index=False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--do_train", action="store_true")
+    parser.add_argument("--do_eval", action="store_true")
     parser.add_argument("--model_name_or_path", type=str, default="microsoft/Phi-3-mini-4k-instruct")
     parser.add_argument("--use_flash_attention", action="store_true")
     parser.add_argument("--prompt_with_example", action="store_true", 
@@ -179,5 +287,12 @@ if __name__ == "__main__":
     parser.add_argument("--max_seq_length", type=int, default=128)
     parser.add_argument("--save_model", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--eval_split", type=str, default="validation")
+    parser.add_argument("--prefill_generation", action="store_true")
+    parser.add_argument("--aspect", type=str, default="service")
+    parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--num_return_sequences", type=int, default=10)
+    parser.add_argument("--do_sample", action="store_true")
+    parser.add_argument("--temperature", type=float, default=0.7)
     args = parser.parse_args()
     main(**vars(args), args=args)
