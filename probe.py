@@ -30,7 +30,6 @@ def main(
     train_path: str = "inst_tune/eval/train/generations.csv",
     validation_path: str = "inst_tune/eval/validation/generations.csv",
     num_generations_per_example: int = 10,
-    prompt_with_example: bool = False,
     # preprocessing arguments
     remove_correct_prefixes : bool = False,
     count_threshold : int = -1,
@@ -57,7 +56,7 @@ def main(
                 continue
             most_common = Counter(des_df['service_labels']).most_common(1)[0]
             data.append({
-                **des_df.iloc[0].to_dict(),
+                **des_df.iloc[0].to_dict(), # use the first row to get the metadata
                 'label': most_common[0],
                 'count': most_common[1],
             })
@@ -104,19 +103,11 @@ def main(
     
     def get_activations(dataset, batch_size=8):
         all_activations = None
-        create_input_fn = partial(create_input_with_example, dataset) if prompt_with_example else create_input
         for i in trange(0, len(dataset), batch_size):
-            batch = dataset.iloc[i:i+batch_size].to_dict(orient="records")
-            examples = [
-                create_input_validation(
-                    create_input_fn, 
-                    tokenizer, 
-                    example,
-                    model.config.max_length
-                ) for example in batch
-            ]
+            # use original prompt for each example (should already contain prefix/example if needed)
+            batch = dataset.iloc[i:i+batch_size]['prompt'].tolist()
             inputs = tokenizer(
-                examples, return_tensors='pt', padding=True, truncation=True
+                batch, return_tensors='pt', padding=True, truncation=True
             ).to(model.device)
             with torch.no_grad():
                 outputs = model(**inputs, output_hidden_states=True)

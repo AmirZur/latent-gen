@@ -184,7 +184,7 @@ def main(
                 )
                 generations += tokenizer.batch_decode(outputs)
                 data += [b for b in batch for _ in range(num_return_sequences)]
-                prompts += examples
+                prompts += [e for e in examples for _ in range(num_return_sequences)]
         df = pd.DataFrame(data)
         df['generation'] = generations
         df['prompt'] = prompts
