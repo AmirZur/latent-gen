@@ -1,3 +1,4 @@
+from functools import partial
 import os
 import argparse
 import itertools
@@ -14,38 +15,17 @@ import yaml
 import random
 import wandb
 from datasets import load_dataset
-from intervention_trainer import make_complex_position_supervised_data_module, InterventionTrainerForCausalLM
-
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-
-ASPECT_KEYWORDS = {
-    'service': ['waiter', 'waitress', 'service', 'staff', 'server', 'host', 'hostess', 'reservation', 'wait']
-}
+from intervention_trainer import make_complex_position_supervised_data_module, DASTrainerForCausalLM
+from utils import (
+    SEED,
+    ASPECT_KEYWORDS,
+    set_seed,
+    create_input,
+    create_input_with_example
+)
+set_seed(SEED)
 
 DATASET_NAME = "CEBaB/CEBaB"
-
-ASSISTANT_PREFIX = '<|assistant|>\n'
-
-PROMPT_TEMPLATE = """Write a short restaurant review for the following restaurant:
-Name: {restaurant_name}
-Cuisine: {cuisine}
-Price tier: {price_tier}
-Dining style: {dining_style}
-Region: {region}"""
-
-def create_example(example):
-    # convert string to dict (VERY UNSAFE, DO NOT USE ON UNTRUSTED DATA)
-    metadata = eval(example['opentable_metadata'])
-    prompt = PROMPT_TEMPLATE.format(**metadata)
-    completion = example['description']
-    messages = [
-        {'role': 'user', 'content': prompt},
-        {'role': 'assistant', 'content': completion}
-    ]
-    return {'messages': messages}
 
 def create_toy_dataset(
     model,
@@ -54,7 +34,8 @@ def create_toy_dataset(
     positions: str = "f1+l1",
     nonstop: bool = True,
     share_weights: bool = True,
-    intervention_offset: int = 0
+    intervention_offset: int = 0,
+    evaluation: bool = False
 ):
     prompt = "When {subject} and {object} went to the store, {subject} gave a drink to"
     names = ["Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Helen", "Ivy", "Jack"]
@@ -93,7 +74,8 @@ def create_toy_dataset(
         num_interventions=num_interventions,
         nonstop=nonstop,
         share_weights=share_weights,
-        intervention_offset=intervention_offset
+        intervention_offset=intervention_offset,
+        evaluation=evaluation
     )
 
 def create_dataset(
@@ -107,19 +89,34 @@ def create_dataset(
     dataset_split: str = "train_inclusive",
     aspect: str = "service",
     num_sources_per_cf: int = 10,
-    binary: bool = False,
+    categories: bool = ['Positive', 'Negative', 'unknown'],
     keyword_match: bool = False,
-    keyword_match_first: bool = True
+    keyword_match_first: bool = True,
+    prompt_with_example: bool = False,
+    assistant_prefix: str = "<|assistant|>",
+    evaluation: bool = False
 ):
-    aspect_key = f'{aspect}_aspect_majority'
+    train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
+    # filter out examples where there is no majority aspect (otherwise can't use examples in prompt)
+    if prompt_with_example:
+        train_dataset = train_dataset.filter(
+            lambda d: 
+                d['food_aspect_majority'] not in ['no majority', ''] and \
+                d['service_aspect_majority'] not in ['no majority', ''] and \
+                d['noise_aspect_majority'] not in ['no majority', ''] and \
+                d['ambiance_aspect_majority'] not in ['no majority', '']
+        )
 
-    train_dataset = load_dataset(DATASET_NAME, split=dataset_split)
-    train_dataset = train_dataset.map(create_example)
+    aspect_key = f'{aspect}_aspect_majority'
+    
+    train_df = train_dataset.to_pandas()
+    create_input_fn = partial(create_input_with_example, train_df) if prompt_with_example else create_input
+    train_dataset = train_dataset.map(create_input_fn)
     edit_dataset = train_dataset.filter(lambda x: x['edit_type'] == aspect)
 
     df = pd.DataFrame(train_dataset)
-    if binary:
-        df = df[df[aspect_key].isin(['Positive', 'Negative'])]
+    # filter to contain only categories
+    df = df[df[aspect_key].isin(categories)]
     if keyword_match:
         df = df[df['description'].apply(lambda x: any(k in x.lower() for k in ASPECT_KEYWORDS[aspect]))]
 
@@ -128,6 +125,7 @@ def create_dataset(
         # skip instances where the aspect is not edited to the goal
         if cf[aspect_key] != cf['edit_goal']:
             continue
+        # skip instances where the aspect is not mentioned in the description (by keyword)
         if keyword_match and not any(k in cf['description'].lower() for k in ASPECT_KEYWORDS[aspect]):
             continue
 
@@ -167,11 +165,11 @@ def create_dataset(
                 )
             else:
                 # split input-output by assistant prefix
-                base_inputs, base_outputs = base_tokens.split(ASSISTANT_PREFIX)
-                base_inputs = base_inputs + ASSISTANT_PREFIX
-                _, cf_outputs = cf_tokens.split(ASSISTANT_PREFIX) # same inputs as base
-                source_inputs, source_outputs = source_tokens.split(ASSISTANT_PREFIX)
-                source_inputs = source_inputs + ASSISTANT_PREFIX
+                base_inputs, base_outputs = base_tokens.split(assistant_prefix)
+                base_inputs = base_inputs + assistant_prefix
+                _, cf_outputs = cf_tokens.split(assistant_prefix) # same inputs as base
+                source_inputs, source_outputs = source_tokens.split(assistant_prefix)
+                source_inputs = source_inputs + assistant_prefix
 
             data.append({
                 'base_input': base_inputs,
@@ -197,21 +195,8 @@ def create_dataset(
         num_interventions=num_interventions,
         nonstop=nonstop,
         share_weights=share_weights,
-        intervention_offset=intervention_offset
-    )
-
-def print_trainable_parameters(model):
-    if isinstance(model, pyreft.ReftModel):
-        model.print_trainable_parameters()
-        return
-    trainable_params = 0
-    all_param = 0
-    for _, param in model.named_parameters():
-        all_param += param.numel()
-        if param.requires_grad:
-            trainable_params += param.numel()
-    print(
-        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
+        intervention_offset=intervention_offset,
+        evaluation=evaluation
     )
 
 def main(
@@ -227,12 +212,15 @@ def main(
     intervention_offset: int = 0,
     # dataset args
     toy_dataset: bool = False,
-    dataset_split: str = "train_inclusive",
+    train_split: str = "train_inclusive",
+    eval_split: str = "validation",
     aspect: str = "service",
     num_sources_per_cf: int = 10,
-    binary: bool = False,
+    categories: bool = ['Positive', 'Negative', 'unknown'],
     keyword_match: bool = False,
     keyword_match_first: bool = True,
+    prompt_with_example: bool = False,
+    assistant_prefix: str = "<|assistant|>",
     # training args
     num_train_epochs: int = 5,
     learning_rate: float = 1e-3,
@@ -247,6 +235,10 @@ def main(
     output_dir: str = "adv_reft",
     save_model: bool = False,
     use_wandb: bool = False,
+    # evaluation args
+    max_new_tokens: int = 256,
+    do_sample: bool = False,
+    temperature: float = 0.7,
     # commandline args
     args: argparse.Namespace = None
 ):
@@ -263,12 +255,15 @@ def main(
         f"  dropout: {dropout}\n"
         f"Dataset args:\n"
         f"  toy_dataset: {toy_dataset}\n"
-        f"  dataset_split: {dataset_split}\n"
+        f"  train_split: {train_split}\n"
+        f"  eval_split: {eval_split}\n"
         f"  aspect: {aspect}\n"
         f"  num_sources_per_cf: {num_sources_per_cf}\n"
-        f"  binary: {binary}\n"
+        f"  categories: {categories}\n"
         f"  keyword_match: {keyword_match}\n"
         f"  keyword_match_first: {keyword_match_first}\n"
+        f"  prompt_with_example: {prompt_with_example}\n"
+        f"  assistant_prefix: {assistant_prefix}\n"
         f"Training args:\n"
         f"  num_train_epochs: {num_train_epochs}\n"
         f"  learning_rate: {learning_rate}\n"
@@ -294,12 +289,11 @@ def main(
         model_name_or_path,
         model_max_length=2048,
         padding_side="right",
-        use_fast=False,
-        trust_remote_code=True
+        use_fast=False
     )
-    tokenizer.pad_token = tokenizer.unk_token
+    if not tokenizer.pad_token_id:
+        tokenizer.pad_token = tokenizer.unk_token
 
-    print('Model class:', type(model))
     if "gpt2" in model_name_or_path:
         pv.type_to_dimension_mapping[type(model)] = {
             "block_output": ("hidden_size",),
@@ -326,7 +320,6 @@ def main(
         return {
             "component": component,
             "low_rank_dimension": rank,
-            # "embed_dim": model.config.hidden_size,
             "subspace_partition": [[0, subspace_dim], [subspace_dim, model.config.hidden_size]],
         }
     
@@ -349,10 +342,10 @@ def main(
     train_model.set_device(device)
     print('Number of interventions:', len(reft_config.representations))
 
-    print_trainable_parameters(train_model)
+    train_model.print_trainable_parameters()
 
     if toy_dataset:
-        data_module = create_toy_dataset(
+        train_data_module = create_toy_dataset(
             model=model,
             tokenizer=tokenizer,
             num_interventions=len(representations),
@@ -361,27 +354,66 @@ def main(
             share_weights=share_weights,
             intervention_offset=intervention_offset
         )
-    else:
-        data_module = create_dataset(
+
+        eval_data_module = create_toy_dataset(
             model=model,
             tokenizer=tokenizer,
             num_interventions=len(representations),
             positions=positions,
             nonstop=True,
             share_weights=share_weights,
-            dataset_split=dataset_split,
+            intervention_offset=intervention_offset,
+            evaluation=True
+        )
+    else:
+        train_data_module = create_dataset(
+            model=model,
+            tokenizer=tokenizer,
+            num_interventions=len(representations),
+            positions=positions,
+            nonstop=True,
+            share_weights=share_weights,
+            dataset_split=train_split,
             aspect=aspect,
             intervention_offset=intervention_offset,
             num_sources_per_cf=num_sources_per_cf,
-            binary=binary,
+            categories=categories,
             keyword_match=keyword_match,
-            keyword_match_first=keyword_match_first
+            keyword_match_first=keyword_match_first,
+            prompt_with_example=prompt_with_example,
+            assistant_prefix=assistant_prefix,
+            evaluation=False
+        )
+
+        eval_data_module = create_dataset(
+            model=model,
+            tokenizer=tokenizer,
+            num_interventions=len(representations),
+            positions=positions,
+            nonstop=True,
+            share_weights=share_weights,
+            dataset_split=eval_split,
+            aspect=aspect,
+            intervention_offset=intervention_offset,
+            num_sources_per_cf=num_sources_per_cf,
+            categories=categories,
+            keyword_match=keyword_match,
+            keyword_match_first=keyword_match_first,
+            prompt_with_example=prompt_with_example,
+            assistant_prefix=assistant_prefix,
+            evaluation=True
         )
 
     report_to = "none"
     if use_wandb:
         wandb.init(project="das_cebab", config=vars(args))
         report_to = "wandb"
+
+    # create run ID from timestamp
+    model_name = model_name_or_path.replace("/", "_")
+    run_id = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    output_dir = f"{output_dir}/{model_name}/{run_id}"
+    os.makedirs(output_dir, exist_ok=True)
 
     training_args = transformers.TrainingArguments(
         num_train_epochs=num_train_epochs,
@@ -401,30 +433,34 @@ def main(
         dataloader_pin_memory=False
     )
 
-    trainer = InterventionTrainerForCausalLM(
+    data_module = {
+        **train_data_module,
+        'eval_dataset': eval_data_module['train_dataset']
+    }
+    trainer = DASTrainerForCausalLM(
         model=train_model,
         tokenizer=tokenizer,
         args=training_args,
         **data_module
     )
     trainer.train()
-    
-    # create run ID from timestamp
-    model_name = model_name_or_path.replace("/", "_")
-    run_id = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    output_dir = f"{output_dir}/{model_name}/{run_id}"
 
-    os.makedirs(output_dir, exist_ok=True)
+    # change padding side to left for evaluation
+    tokenizer.padding_side = "left"
+    eval_data = trainer.evaluate(
+        max_new_tokens=max_new_tokens,
+        do_sample=do_sample,
+        temperature=temperature
+    )
+
+    eval_df = pd.DataFrame(eval_data, columns=["original_output", "das_output", "base", "source"])
+    eval_df.to_csv(f"{output_dir}/eval.csv", index=False)
 
     if save_model:
-        if isinstance(train_model, pyreft.ReftModel):
-            train_model.save(f"{output_dir}/weights")
-        else:
-            trainer.save_model(output_dir)
+        train_model.save(f"{output_dir}/weights")
     
     with open(f"{output_dir}/config.json", "w+") as f:
         config = vars(args)
-        config['padding_side'] = tokenizer.padding_side
         json.dump(config, f, indent=2)
 
 if __name__ == "__main__":
@@ -441,12 +477,15 @@ if __name__ == "__main__":
     parser.add_argument("--intervention_offset", type=int, default=0)
     # dataset args
     parser.add_argument("--toy_dataset", action="store_true")
-    parser.add_argument("--dataset_split", type=str, default="train_inclusive")
+    parser.add_argument("--train_split", type=str, default="train_inclusive")
+    parser.add_argument("--eval_split", type=str, default="validation")
     parser.add_argument("--aspect", type=str, default="service")
     parser.add_argument("--num_sources_per_cf", type=int, default=10)
-    parser.add_argument("--binary", action="store_true")
+    parser.add_argument("--categories", nargs="+", default=['Positive', 'Negative', 'unknown'])
     parser.add_argument("--keyword_match", action="store_true")
     parser.add_argument("--keyword_match_first", action="store_true")
+    parser.add_argument("--prompt_with_example", action="store_true")
+    parser.add_argument("--assistant_prefix", type=str, default="<|assistant|>")
     # training args
     parser.add_argument("--num_train_epochs", type=int, default=5)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
@@ -456,6 +495,10 @@ if __name__ == "__main__":
     parser.add_argument("--lr_scheduler_type", type=str, default="linear")
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    # evaluation args
+    parser.add_argument("--max_new_tokens", type=int, default=256)
+    parser.add_argument("--do_sample", action="store_true")
+    parser.add_argument("--temperature", type=float, default=0.7)
     # logging args
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--output_dir", type=str, default="adv_reft")

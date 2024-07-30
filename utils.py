@@ -32,9 +32,13 @@ Write a review:"""
 
 LABELS = ['Negative', 'Positive', 'unknown']
 
+ASPECT_KEYWORDS = {
+    'service': ['waiter', 'waitress', 'service', 'staff', 'server', 'host', 'hostess', 'reservation', 'wait']
+}
+
 SEED = 42
 
-def set_seed(seed):
+def set_seed(seed=SEED):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

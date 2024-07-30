@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 IGNORE_INDEX = -100
 
 @dataclass
-class InterventionDataCollator(object):
+class DASDataCollator(object):
     """Collate examples for Pyvene intervention training."""
     data_collator: transformers.DataCollator
 
@@ -67,7 +67,7 @@ class InterventionDataCollator(object):
 
         return batch_inputs
 
-class InterventionTrainer(ReftTrainer):
+class DASTrainer(ReftTrainer):
     def compute_loss(
         self,
         intervenable: pv.IntervenableModel,
@@ -134,7 +134,7 @@ class InterventionTrainer(ReftTrainer):
         sources = []
 
         dataloader = make_dataloader(
-            self.train_dataset, 
+            self.eval_dataset, 
             self.args.eval_batch_size, 
             self.data_collator, 
             shuffle=False
@@ -182,10 +182,12 @@ def make_dataloader(
     ) -> DataLoader:
     return DataLoader(dataset, shuffle=shuffle, batch_size=batch_size, collate_fn=collate_fn)
 
-class InterventionTrainerForCausalLM(InterventionTrainer):
+class DASTrainerForCausalLM(DASTrainer):
     def get_train_dataloader(self) -> DataLoader:
         return make_dataloader(self.train_dataset, self._train_batch_size, self.data_collator, shuffle=True)
 
+    def get_eval_dataloader(self) -> DataLoader:
+        return make_dataloader(self.eval_dataset, self.args.eval_batch_size, self.data_collator, shuffle=False)
 
 def parse_complex_positions(positions: str):
     # parse position
@@ -385,5 +387,5 @@ def make_complex_position_supervised_data_module(
         label_pad_token_id=IGNORE_INDEX,
         padding="longest"
     )
-    data_collator = InterventionDataCollator(data_collator=data_collator_fn)
+    data_collator = DASDataCollator(data_collator=data_collator_fn)
     return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)

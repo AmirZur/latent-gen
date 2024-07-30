@@ -33,13 +33,14 @@ def create_dataset(
     if dataset_split is None:
         dataset_split = "train_inclusive" if prompt_with_example else "train_observational"
     train_dataset = load_dataset("CEBaB/CEBaB", split=dataset_split)
-    train_dataset = train_dataset.filter(
-        lambda d: 
-            d['food_aspect_majority'] not in ['no majority', ''] and \
-            d['service_aspect_majority'] not in ['no majority', ''] and \
-            d['noise_aspect_majority'] not in ['no majority', ''] and \
-            d['ambiance_aspect_majority'] not in ['no majority', '']
-    )
+    if prompt_with_example:
+        train_dataset = train_dataset.filter(
+            lambda d: 
+                d['food_aspect_majority'] not in ['no majority', ''] and \
+                d['service_aspect_majority'] not in ['no majority', ''] and \
+                d['noise_aspect_majority'] not in ['no majority', ''] and \
+                d['ambiance_aspect_majority'] not in ['no majority', '']
+        )
     train_df = train_dataset.to_pandas()
     create_input_fn = partial(create_input_with_example, train_df) if prompt_with_example else create_input
     # preprocess the data
