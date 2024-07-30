@@ -15,7 +15,7 @@ import yaml
 import random
 import wandb
 from datasets import load_dataset
-from intervention_trainer import make_complex_position_supervised_data_module, DASTrainerForCausalLM
+from intervention_trainer import make_data_module, DASTrainerForCausalLM, ContrastiveDASTrainerForCausalLM
 from utils import (
     SEED,
     ASPECT_KEYWORDS,
@@ -59,14 +59,16 @@ def create_toy_dataset(
         })
     
     base_inputs = [d['base_input'] for d in data]
+    base_outputs = [d['base_output'] for d in data]
     cf_outputs = [d['cf_output'] for d in data]
     source_inputs = [d['source_input'] for d in data]
     source_outputs = [d['source_output'] for d in data]
 
-    return make_complex_position_supervised_data_module(
+    return make_data_module(
         tokenizer,
         model,
         base_inputs,
+        base_outputs,
         cf_outputs,
         source_inputs,
         source_outputs,
@@ -112,8 +114,7 @@ def create_dataset(
     train_df = train_dataset.to_pandas()
     create_input_fn = partial(create_input_with_example, train_df) if prompt_with_example else create_input
     train_dataset = train_dataset.map(create_input_fn)
-    # filter out examples with no messages
-    train_dataset = train_dataset.filter(lambda x: x['messages'] is not None)
+    train_dataset = train_dataset.filter(lambda x: x['messages'] is not None) # ignore examples with no messages
     edit_dataset = train_dataset.filter(lambda x: x['edit_type'] == aspect)
 
     df = train_dataset.to_pandas()
@@ -183,14 +184,16 @@ def create_dataset(
             })
     
     base_inputs = [d['base_input'] for d in data]
+    base_outputs = [d['base_output'] for d in data]
     cf_outputs = [d['cf_output'] for d in data]
     source_inputs = [d['source_input'] for d in data]
     source_outputs = [d['source_output'] for d in data]
 
-    return make_complex_position_supervised_data_module(
+    return make_data_module(
         tokenizer,
         model,
         base_inputs,
+        base_outputs,
         cf_outputs,
         source_inputs,
         source_outputs,
@@ -225,6 +228,7 @@ def main(
     prompt_with_example: bool = False,
     assistant_prefix: str = "<|assistant|>",
     # training args
+    contrastive_training: bool = False,
     num_train_epochs: int = 5,
     learning_rate: float = 1e-3,
     batch_size: int = 10,
@@ -268,6 +272,7 @@ def main(
         f"  prompt_with_example: {prompt_with_example}\n"
         f"  assistant_prefix: {assistant_prefix}\n"
         f"Training args:\n"
+        f"  contrastive_training: {contrastive_training}\n"
         f"  num_train_epochs: {num_train_epochs}\n"
         f"  learning_rate: {learning_rate}\n"
         f"  batch_size: {batch_size}\n"
@@ -289,7 +294,7 @@ def main(
     )
     # get tokenizer
     tokenizer = transformers.AutoTokenizer.from_pretrained(
-        model_name_or_path,
+        model_name_or_path
     )
     if not tokenizer.pad_token_id:
         tokenizer.pad_token = tokenizer.unk_token
@@ -437,7 +442,9 @@ def main(
         **train_data_module,
         'eval_dataset': eval_data_module['train_dataset']
     }
-    trainer = DASTrainerForCausalLM(
+
+    trainer_cls = ContrastiveDASTrainerForCausalLM if contrastive_training else DASTrainerForCausalLM
+    trainer = trainer_cls(
         model=train_model,
         tokenizer=tokenizer,
         args=training_args,
@@ -487,6 +494,7 @@ if __name__ == "__main__":
     parser.add_argument("--prompt_with_example", action="store_true")
     parser.add_argument("--assistant_prefix", type=str, default="<|assistant|>")
     # training args
+    parser.add_argument("--contrastive_training", action="store_true")
     parser.add_argument("--num_train_epochs", type=int, default=5)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--batch_size", type=int, default=10)

@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 IGNORE_INDEX = -100
 
 @dataclass
-class DASDataCollator(object):
+class ContrastiveDASDataCollator(object):
     """Collate examples for Pyvene intervention training."""
     data_collator: transformers.DataCollator
 
@@ -24,7 +24,9 @@ class DASDataCollator(object):
         instances : dict with keys
             "input_ids" : torch.Tensor
                 input ids of base + cf output
-            "labels" : torch.Tensor
+            "base_labels" : torch.Tensor
+                labels of base output (equal to input_ids but with prompt masked out)
+            "cf_labels" : torch.Tensor
                 labels of base + cf output (equal to input_ids but with prompt masked out)
             "intervention_locations" : torch.Tensor
                 intervention locations for base
@@ -36,7 +38,7 @@ class DASDataCollator(object):
         base_instances = [{
             "input_ids": instance["input_ids"],
             "intervention_locations": instance["intervention_locations"],
-            "labels": instance["labels"]
+            "labels": instance["cf_labels"] # use cf output as labels
         } for instance in instances]
 
         source_instances = [{
@@ -67,6 +69,80 @@ class DASDataCollator(object):
 
         return batch_inputs
 
+@dataclass
+class DASDataCollator(object):
+    """Collate examples for Pyvene intervention training."""
+    data_collator: transformers.DataCollator
+
+    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
+        """
+        Collate examples for Pyvene intervention training.
+
+        instances : dict with keys
+            "base_input_ids" : torch.Tensor
+                base input + base output
+            "cf_input_ids" : torch.Tensor
+                base input + cf output
+            "base_labels" : torch.Tensor
+                base_input_ids with prompt masked out
+            "cf_labels" : torch.Tensor
+                cf_input_ids with prompt masked out
+            "intervention_locations" : torch.Tensor
+                intervention locations for base
+            "source_input_ids" : torch.Tensor
+                input ids of source example + source output
+            "source_intervention_locations" : torch.Tensor
+                intervention locations for source example
+        """
+        # base instances (used as NEGATIVE training examples)
+        base_instances = [{
+            "input_ids": instance["base_input_ids"],
+            "intervention_locations": instance["intervention_locations"],
+            "labels": instance["base_labels"]
+        } for instance in instances]
+
+        # counterfactual instances (used as POSITIVE training examples)
+        cf_instances = [{
+            "input_ids": instance["cf_input_ids"],
+            # share intervention locations with base (same prompt)
+            "intervention_locations": instance["intervention_locations"],
+            "labels": instance["cf_labels"]
+        } for instance in instances]
+
+        # source instances (used for interchange intervention)
+        source_instances = [{
+            "input_ids": instance["source_input_ids"],
+            "intervention_locations": instance["source_intervention_locations"],
+            "labels": [-100] * len(instance['source_input_ids']) # dummy label, not used
+        } for instance in instances]
+
+        # collate as batch
+        all_instances = base_instances + cf_instances + source_instances
+
+        batch_inputs = self.data_collator(all_instances)
+        all_input_ids = batch_inputs.pop("input_ids")
+        all_attention_mask = batch_inputs.pop("attention_mask")
+        all_labels = batch_inputs.pop("labels")
+        all_intervention_locations = batch_inputs.pop("intervention_locations")
+        
+        # base inputs
+        batch_inputs["input_ids"] = all_input_ids[:len(instances)]
+        batch_inputs["attention_mask"] = all_attention_mask[:len(instances)]
+        batch_inputs["labels"] = all_labels[:len(instances)]
+        batch_inputs["intervention_locations"] = all_intervention_locations[:len(instances)]
+
+        # cf inputs
+        batch_inputs["cf_input_ids"] = all_input_ids[len(instances):len(instances)*2]
+        batch_inputs["cf_attention_mask"] = all_attention_mask[len(instances):len(instances)*2]
+        batch_inputs["cf_labels"] = all_labels[len(instances):len(instances)*2]
+
+        # source inputs
+        batch_inputs["source_input_ids"] = all_input_ids[len(instances)*2:]
+        batch_inputs["source_attention_mask"] = all_attention_mask[len(instances)*2:]
+        batch_inputs["source_intervention_locations"] = all_intervention_locations[len(instances)*2:]
+
+        return batch_inputs
+
 class DASTrainer(ReftTrainer):
     def compute_loss(
         self,
@@ -91,7 +167,7 @@ class DASTrainer(ReftTrainer):
         """
         if self.tokenizer.padding_side == "left":
             # shift intervention locations by left padding amount
-            base_padding = inputs["input_ids"].shape[1] - inputs["attention_mask"].sum(dim=1)
+            base_padding = inputs["cf_input_ids"].shape[1] - inputs["cf_attention_mask"].sum(dim=1)
             source_padding = inputs["source_input_ids"].shape[1] - inputs["source_attention_mask"].sum(dim=1)
             base_intervention_locations = inputs["intervention_locations"] + base_padding[:, None, None]
             source_intervention_locations = inputs["source_intervention_locations"] + source_padding[:, None, None]
@@ -99,12 +175,12 @@ class DASTrainer(ReftTrainer):
             base_intervention_locations = inputs["intervention_locations"]
             source_intervention_locations = inputs["source_intervention_locations"]
 
-        # run intervened forward pass
+        # run intervened forward pass on counterfactual example
         _, cf_outputs = intervenable(
             # base
             {
-                "input_ids": inputs["input_ids"],
-                "attention_mask": inputs["attention_mask"]
+                "input_ids": inputs["cf_input_ids"],
+                "attention_mask": inputs["cf_attention_mask"]
             },
             # source
             [{
@@ -117,7 +193,7 @@ class DASTrainer(ReftTrainer):
                 # paste to
                 base_intervention_locations.permute(1, 0, 2).tolist()
             )},
-            labels=inputs["labels"],
+            labels=inputs["cf_labels"],
             # for now, always use first subspace partition
             subspaces=0 # inputs["subspaces"].permute(1, 0, 2).tolist() if "subspaces" in inputs else None
         )
@@ -177,12 +253,91 @@ class DASTrainer(ReftTrainer):
                 sources += self.tokenizer.batch_decode(inputs["source_input_ids"], skip_special_tokens=True)
         return list(zip(original_outputs, das_outputs, bases, sources))
 
+class ContrastiveDASTrainer(DASTrainer):
+    def compute_loss(
+        self,
+        intervenable: pv.IntervenableModel,
+        inputs,
+        return_outputs=False
+    ):
+        if self.tokenizer.padding_side == "left":
+            # shift intervention locations by left padding amount
+            cf_padding = inputs["cf_input_ids"].shape[1] - inputs["cf_attention_mask"].sum(dim=1)
+            base_padding = inputs["input_ids"].shape[1] - inputs["attention_mask"].sum(dim=1)
+            source_padding = inputs["source_input_ids"].shape[1] - inputs["source_attention_mask"].sum(dim=1)
+            cf_intervention_locations = inputs["intervention_locations"] + cf_padding[:, None, None]
+            base_intervention_locations = inputs["intervention_locations"] + base_padding[:, None, None]
+            source_intervention_locations = inputs["source_intervention_locations"] + source_padding[:, None, None]
+        else:
+            cf_intervention_locations = inputs["intervention_locations"]
+            base_intervention_locations = inputs["intervention_locations"]
+            source_intervention_locations = inputs["source_intervention_locations"]
+
+        # run intervened forward pass on counterfactual example
+        _, cf_outputs = intervenable(
+            # base
+            {
+                "input_ids": inputs["cf_input_ids"],
+                "attention_mask": inputs["cf_attention_mask"]
+            },
+            # source
+            [{
+                "input_ids": inputs["source_input_ids"],
+                "attention_mask": inputs["source_attention_mask"]
+            }],
+            unit_locations={"sources->base": (
+                # copy from
+                source_intervention_locations.permute(1, 0, 2).tolist(),
+                # paste to
+                cf_intervention_locations.permute(1, 0, 2).tolist()
+            )},
+            labels=inputs["cf_labels"],
+            # for now, always use first subspace partition
+            subspaces=0 # inputs["subspaces"].permute(1, 0, 2).tolist() if "subspaces" in inputs else None
+        )
+
+        # run intervened forward pass on base example
+        _, base_outputs = intervenable(
+            # base
+            {
+                "input_ids": inputs["input_ids"],
+                "attention_mask": inputs["attention_mask"]
+            },
+            # source
+            [{
+                "input_ids": inputs["source_input_ids"],
+                "attention_mask": inputs["source_attention_mask"]
+            }],
+            unit_locations={"sources->base": (
+                # copy from
+                source_intervention_locations.permute(1, 0, 2).tolist(),
+                # paste to
+                base_intervention_locations.permute(1, 0, 2).tolist()
+            )},
+            labels=inputs["labels"],
+            # for now, always use first subspace partition
+            subspaces=0 # inputs["subspaces"].permute(1, 0, 2).tolist() if "subspaces" in inputs else None
+        )
+        
+        # contrastive loss (dock base loss from cf loss)
+        loss = cf_outputs.loss - base_outputs.loss
+
+        # return
+        return (loss, cf_outputs[:2]) if return_outputs else loss
+
 def make_dataloader(
         dataset: Dataset, batch_size: int, collate_fn: transformers.DataCollatorForSeq2Seq, shuffle: bool
     ) -> DataLoader:
     return DataLoader(dataset, shuffle=shuffle, batch_size=batch_size, collate_fn=collate_fn)
 
 class DASTrainerForCausalLM(DASTrainer):
+    def get_train_dataloader(self) -> DataLoader:
+        return make_dataloader(self.train_dataset, self._train_batch_size, self.data_collator, shuffle=True)
+
+    def get_eval_dataloader(self) -> DataLoader:
+        return make_dataloader(self.eval_dataset, self.args.eval_batch_size, self.data_collator, shuffle=False)
+
+class ContrastiveDASTrainerForCausalLM(ContrastiveDASTrainer):
     def get_train_dataloader(self) -> DataLoader:
         return make_dataloader(self.train_dataset, self._train_batch_size, self.data_collator, shuffle=True)
 
@@ -283,11 +438,12 @@ def get_complex_intervention_locations(**kwargs):
     return intervention_locations
 
 
-def make_complex_position_supervised_data_module(
+def make_data_module(
     tokenizer: transformers.PreTrainedTokenizer, 
     model,
     base_inputs, 
-    cf_outputs,
+    base_outputs, # original base output
+    cf_outputs, # counterfactual base output
     source_inputs,
     source_outputs, 
     positions="f1+l1+d1", 
@@ -300,16 +456,20 @@ def make_complex_position_supervised_data_module(
     """Make dataset and collator for supervised fine-tuning."""
     first_n, last_n, decode_intv = parse_complex_positions(positions)
     
-    all_base_input_ids, all_intervention_locations, all_output_ids = [], [], []
+    all_base_input_ids, all_cf_input_ids, all_intervention_locations = [], [], []
+    all_base_output_ids, all_cf_output_ids = [], []
     all_source_input_ids, all_source_intervention_locations = [], []
     for i in range(len(base_inputs)):
         _base = base_inputs[i]
-        _output = cf_outputs[i]
+        _base_output = base_outputs[i]
+        _cf_output = cf_outputs[i]
     
         base_prompt = _base
-        base_input = base_prompt + _output
+        base_input = base_prompt + _base_output
+        cf_input = base_prompt + _cf_output
         if not nonstop:
             base_input += tokenizer.eos_token
+            cf_input += tokenizer.eos_token
     
         # tokenize
         base_prompt_ids = tokenizer(
@@ -319,8 +479,13 @@ def make_complex_position_supervised_data_module(
         base_prompt_length = len(base_prompt_ids) + intervention_offset
         base_input_ids = tokenizer(
             base_input, max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")["input_ids"][0]
-        output_ids = copy.deepcopy(base_input_ids)
-        output_ids[:base_prompt_length] = IGNORE_INDEX
+        cf_input_ids = tokenizer(
+            cf_input, max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")["input_ids"][0]
+        # mask out prompt (no need for training on prompt)
+        base_output_ids = copy.deepcopy(base_input_ids)
+        base_output_ids[:base_prompt_length] = IGNORE_INDEX
+        cf_output_ids = copy.deepcopy(cf_input_ids)
+        cf_output_ids[:base_prompt_length] = IGNORE_INDEX
 
         _source_input = source_inputs[i]
         _source_output = source_outputs[i]
@@ -335,7 +500,7 @@ def make_complex_position_supervised_data_module(
             source_input, max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")["input_ids"][0]
         
         # NOTE: if using decoding intervals, use same length to guarantee same # of source & base intervention locations
-        last_input_position = min(len(output_ids), len(source_input_ids))
+        last_input_position = min(len(base_output_ids), len(source_input_ids))
 
         if evaluation:
             # chop off base input ids to only include the prompt
@@ -345,6 +510,7 @@ def make_complex_position_supervised_data_module(
                 continue
             base_input_ids = base_input_ids[:base_prompt_length]
 
+        # same intervention location for original & counterfactual, bc they share the same prompt
         intervention_locations = get_complex_intervention_locations(
             last_prompt_position=base_prompt_length,
             last_input_position=last_input_position,
@@ -368,15 +534,19 @@ def make_complex_position_supervised_data_module(
         )
         
         all_base_input_ids.append(base_input_ids)
+        all_cf_input_ids.append(cf_input_ids)
         all_intervention_locations.append(intervention_locations)
-        all_output_ids.append(output_ids)
+        all_base_output_ids.append(base_output_ids)
+        all_cf_output_ids.append(cf_output_ids)
         all_source_input_ids.append(source_input_ids)
         all_source_intervention_locations.append(source_intervention_locations)
         
     train_dataset = datasets.Dataset.from_dict({
-        "input_ids": all_base_input_ids,
+        "base_input_ids": all_base_input_ids,
+        "cf_input_ids": all_cf_input_ids,
         "intervention_locations": all_intervention_locations,
-        "labels": all_output_ids,
+        "base_labels": all_base_output_ids,
+        "cf_labels": all_cf_output_ids,
         "source_input_ids": all_source_input_ids,
         "source_intervention_locations": all_source_intervention_locations
     })

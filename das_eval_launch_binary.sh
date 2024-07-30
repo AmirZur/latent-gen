@@ -1,2 +1,0 @@
-nlprun -a pyvene -g 1 -r 40G -q sphinx -o logs/das_eval_i20_binary.log 'bash das_eval.sh "das/inst_tune/2024-07-23-22-55-21/weights" 20'
-nlprun -a pyvene -g 1 -r 40G -q sphinx -o logs/das_eval_i10_binary.log 'bash das_eval.sh "das/inst_tune/2024-07-23-20-16-14/weights" 10'
