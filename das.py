@@ -112,10 +112,13 @@ def create_dataset(
     train_df = train_dataset.to_pandas()
     create_input_fn = partial(create_input_with_example, train_df) if prompt_with_example else create_input
     train_dataset = train_dataset.map(create_input_fn)
+    # filter out examples with no messages
+    train_dataset = train_dataset.filter(lambda x: x['messages'] is not None)
     edit_dataset = train_dataset.filter(lambda x: x['edit_type'] == aspect)
 
-    df = pd.DataFrame(train_dataset)
-    # filter to contain only categories
+    df = train_dataset.to_pandas()
+
+    # apply filters
     df = df[df[aspect_key].isin(categories)]
     if keyword_match:
         df = df[df['description'].apply(lambda x: any(k in x.lower() for k in ASPECT_KEYWORDS[aspect]))]
