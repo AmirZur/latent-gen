@@ -290,9 +290,6 @@ def main(
     # get tokenizer
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_name_or_path,
-        model_max_length=2048,
-        padding_side="right",
-        use_fast=False
     )
     if not tokenizer.pad_token_id:
         tokenizer.pad_token = tokenizer.unk_token
