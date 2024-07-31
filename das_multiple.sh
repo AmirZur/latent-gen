@@ -1,9 +1,10 @@
+pos=$1
 python das.py \
     --model_name_or_path "inst_tune/train" \
     --use_flash_attention \
     --layers "20;22;24;26;28;30" \
     --subspace_dim 128 \
-    --positions "l1" \
+    --positions "l$1" \
     --share_weights \
     --dropout 0 \
     --intervention_offset 0 \
