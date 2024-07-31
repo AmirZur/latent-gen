@@ -4,7 +4,7 @@ python das.py \
     --use_flash_attention \
     --layers "20;22;24;26;28;30" \
     --subspace_dim 128 \
-    --positions "l$1" \
+    --positions "l${pos}" \
     --share_weights \
     --dropout 0 \
     --intervention_offset 0 \
