@@ -41,6 +41,27 @@ Region: {region}
 
 Write a review:"""
 
+PROMPT_TEMPLATE_ONE_SHOT = """Your task is to write short restaurant reviews. Follow the same sentiment to {aspects} as in the example below.
+
+Example restaurant:
+Name: {example_restaurant_name}
+Cuisine: {example_cuisine}
+Price tier: {example_price_tier}
+Dining style: {example_dining_style}
+Region: {example_region}
+
+Example review:
+{example_review}
+
+Restaurant to review:
+Name: {restaurant_name}
+Cuisine: {cuisine}
+Price tier: {price_tier}
+Dining style: {dining_style}
+Region: {region}
+
+Write a review:"""
+
 LABELS = ['Negative', 'Positive', 'unknown']
 
 ASPECT_KEYWORDS = {
@@ -140,15 +161,35 @@ def create_input_one_shot(df, datapoint):
         else:
             aspects += f', {aspect}'
         
-    instruction_prompt = INSTRUCTION_TEMPLATE.format(aspects=aspects)
-    example_prompt = EXAMPLE_TEMPLATE.format(**example_metadata)
-    prompt = EXAMPLE_TEMPLATE.format(**metadata)
-    example_completion = example['description']
+    # instruction_prompt = INSTRUCTION_TEMPLATE.format(aspects=aspects)
+    # example_prompt = EXAMPLE_TEMPLATE.format(**example_metadata)
+    # prompt = EXAMPLE_TEMPLATE.format(**metadata)
+    # example_completion = example['description']
+    # completion = datapoint['description']
+    # messages = [
+    #     {'role': 'user', 'content': instruction_prompt},
+    #     {'role': 'user', 'content': example_prompt},
+    #     {'role': 'assistant', 'content': example_completion},
+    #     {'role': 'user', 'content': prompt},
+    #     {'role': 'assistant', 'content': completion}
+    # ]
+
+    prompt = PROMPT_TEMPLATE_ONE_SHOT.format(
+        restaurant_name=metadata['restaurant_name'],
+        cuisine=metadata['cuisine'],
+        price_tier=metadata['price_tier'],
+        dining_style=metadata['dining_style'],
+        region=metadata['region'],
+        example_restaurant_name=example_metadata['restaurant_name'],
+        example_cuisine=example_metadata['cuisine'],
+        example_price_tier=example_metadata['price_tier'],
+        example_dining_style=example_metadata['dining_style'],
+        example_region=example_metadata['region'],
+        example_review=example['description'],
+        aspects=aspects
+    )
     completion = datapoint['description']
     messages = [
-        {'role': 'user', 'content': instruction_prompt},
-        {'role': 'user', 'content': example_prompt},
-        {'role': 'assistant', 'content': example_completion},
         {'role': 'user', 'content': prompt},
         {'role': 'assistant', 'content': completion}
     ]
