@@ -3,7 +3,7 @@ do
     python instruct_tune.py \
         --do_eval \
         --do_classify \
-        --model_name_or_path "inst_tune/train" \
+        --model_name_or_path "microsoft/Phi-3-mini-4k-instruct" \
         --use_flash_attention \
         --prompt_with_example \
         --eval_split $split \
