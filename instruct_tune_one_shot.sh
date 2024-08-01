@@ -10,7 +10,7 @@ python instruct_tune.py \
     --per_device_train_batch_size 32 \
     --num_train_epochs 5 \
     --learning_rate 1e-5 \
-    --eval_split $split \
+    --eval_split "validation" \
     --per_device_eval_batch_size 8 \
     --aspect "service" \
     --max_new_tokens 256 \
