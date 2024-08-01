@@ -2,7 +2,6 @@ import argparse
 import datetime
 from functools import partial
 import os
-import random
 from typing import Optional
 import numpy as np
 import pandas as pd
@@ -11,12 +10,13 @@ from tqdm import trange
 import wandb
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 from trl import SFTTrainer, SFTConfig
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from utils import (
     get_original,
     get_prefix,
     create_input, 
     create_input_with_example,
+    create_input_one_shot,
     create_input_validation, 
     LABELS, 
     SEED, 
@@ -26,8 +26,10 @@ set_seed(SEED)
 
 def create_dataset(
     prompt_with_example: bool = False,
+    one_shot: bool = False,
     dataset_split: Optional[str] = None,
-    remove_columns: bool = False
+    remove_columns: bool = False,
+    num_replicas: int = 1
 ):
     # load the dataset (if split is optional, use prompt_with_example to determine which split to use)
     if dataset_split is None:
@@ -41,10 +43,25 @@ def create_dataset(
                 d['noise_aspect_majority'] not in ['no majority', ''] and \
                 d['ambiance_aspect_majority'] not in ['no majority', '']
         )
+    elif one_shot:
+        train_dataset = train_dataset.filter(
+            lambda d: 
+                d['food_aspect_majority'] in ['Positive', 'Negative'] or \
+                d['service_aspect_majority'] in ['Positive', 'Negative'] or \
+                d['noise_aspect_majority'] in ['Positive', 'Negative'] or \
+                d['ambiance_aspect_majority'] in ['Positive', 'Negative']
+        )
     train_df = train_dataset.to_pandas()
-    create_input_fn = partial(create_input_with_example, train_df) if prompt_with_example else create_input
+    if prompt_with_example:
+        create_input_fn = partial(create_input_with_example, train_df)
+    elif one_shot:
+        create_input_fn = partial(create_input_one_shot, train_df)
+    else:
+        create_input_fn = create_input
     # preprocess the data
     remove_columns = train_dataset.features if remove_columns else None
+    # repeat the train_dataset to simulate a larger dataset
+    train_dataset = concatenate_datasets([train_dataset] * num_replicas)
     train_dataset = train_dataset.map(create_input_fn, remove_columns=remove_columns)
     # filter out examples with no messages
     train_dataset = train_dataset.filter(lambda x: x['messages'] is not None)
@@ -60,6 +77,8 @@ def main(
     use_flash_attention: bool = False,
     # data arguments
     prompt_with_example: bool = False,
+    one_shot: bool = False,
+    num_replicas: int = 1,
     # training arguments
     output_dir: str = "inst_tune",
     per_device_train_batch_size: int = 4,
@@ -107,7 +126,12 @@ def main(
 
     # Train model
     if do_train:
-        train_dataset, _ = create_dataset(prompt_with_example, remove_columns=True)
+        train_dataset, _ = create_dataset(
+            prompt_with_example, 
+            one_shot,
+            remove_columns=True,
+            num_replicas=num_replicas
+        )
 
         report_to = []
         if use_wandb:
@@ -144,7 +168,13 @@ def main(
     # Evaluate the model
     if do_eval:
         # load eval dataset
-        eval_dataset, create_input_fn = create_dataset(prompt_with_example, eval_split, remove_columns=False)
+        eval_dataset, create_input_fn = create_dataset(
+            prompt_with_example, 
+            one_shot,
+            eval_split, 
+            remove_columns=False,
+            num_replicas=1
+        )
         if prefill_generation:
             original_df = pd.DataFrame(eval_dataset)
             df = original_df[original_df['edit_type'] == aspect].copy()
@@ -237,6 +267,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_flash_attention", action="store_true")
     parser.add_argument("--prompt_with_example", action="store_true", 
                         help="Prompt with an example review (uses inclusive training data, otherwise uses observational training data)")
+    parser.add_argument("--one_shot", action="store_true")
+    parser.add_argument("--num_replicas", type=int, default=1)
     parser.add_argument("--output_dir", type=str, default="inst_tune")
     parser.add_argument("--per_device_train_batch_size", type=int, default=4)
     parser.add_argument("--per_device_eval_batch_size", type=int, default=4)

@@ -2,6 +2,17 @@ import random
 import numpy as np
 import torch
 
+INSTRUCTION_TEMPLATE = """Your task is to write short restaurant reviews. You must be consistent with the sentiment towards {aspects}."""
+
+EXAMPLE_TEMPLATE = """Write a short restaurant review for the following restaurant:
+Name: {restaurant_name}
+Cuisine: {cuisine}
+Price tier: {price_tier}
+Dining style: {dining_style}
+Region: {region}
+
+Review:"""
+
 PROMPT_TEMPLATE = """Write a short restaurant review for the following restaurant:
 Name: {restaurant_name}
 Cuisine: {cuisine}
@@ -80,7 +91,7 @@ def create_input_with_example(df, datapoint):
     # on the off chance where we don't have a matching example, skip it
     if example.shape[0] == 0:
         return {'messages': None}
-    example = example.sample(random_state=SEED).iloc[0]
+    example = example.sample().iloc[0]
     example_metadata = eval(example['opentable_metadata'])
     prompt = PROMPT_TEMPLATE_WITH_EXAMPLE.format(
         restaurant_name=metadata['restaurant_name'],
@@ -97,6 +108,47 @@ def create_input_with_example(df, datapoint):
     )
     completion = datapoint['description']
     messages = [
+        {'role': 'user', 'content': prompt},
+        {'role': 'assistant', 'content': completion}
+    ]
+    return {'messages': messages}
+
+def create_input_one_shot(df, datapoint):
+    metadata = eval(datapoint['opentable_metadata'])
+    example_df = df[df['id'] != datapoint['id']]
+    # filter out examples that don't match the sentiment (if it's expressed)
+    relevant_keys = []
+    for key in ['food_aspect_majority', 'service_aspect_majority', 'noise_aspect_majority', 'ambiance_aspect_majority']:
+        if datapoint[key] in ['Positive', 'Negative']:
+            example_df = example_df[example_df[key] == datapoint[key]]
+            relevant_keys.append(key)
+    # on the off chance where we don't have a matching example, skip it
+    if example_df.shape[0] == 0:
+        return {'messages': None}
+    # sample a random example
+    example = example_df.sample().iloc[0]
+    example_metadata = eval(example['opentable_metadata'])
+
+    # parse out relevant aspects
+    aspects = ''
+    for i, key in enumerate(relevant_keys):
+        aspect = key.split('_')[0]
+        if i == 0:
+            aspects = aspect
+        elif i == len(relevant_keys) - 1:
+            aspects += f', and {aspect}'
+        else:
+            aspects += f', {aspect}'
+        
+    instruction_prompt = INSTRUCTION_TEMPLATE.format(aspects=aspects)
+    example_prompt = EXAMPLE_TEMPLATE.format(**example_metadata)
+    prompt = EXAMPLE_TEMPLATE.format(**metadata)
+    example_completion = example['description']
+    completion = datapoint['description']
+    messages = [
+        {'role': 'user', 'content': instruction_prompt},
+        {'role': 'user', 'content': example_prompt},
+        {'role': 'assistant', 'content': example_completion},
         {'role': 'user', 'content': prompt},
         {'role': 'assistant', 'content': completion}
     ]
