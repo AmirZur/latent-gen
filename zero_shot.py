@@ -172,11 +172,11 @@ def main(
     df = pd.DataFrame(data)
     df['generation'] = generations
     df['prompt'] = prompts
+    df['perplexity_cebab'] = perplexities_cebab
+    df['perplexity_generation'] = perplexities_gen
     df['text'] = df['generation'].map(
         lambda x: x.split(assistant_prefix)[1].split(assistant_suffix)[0].strip()
     )
-    df['perplexity_cebab'] = perplexities_cebab
-    df['perplexity_generation'] = perplexities_gen
 
     # save the generations
     os.makedirs(f"{output_dir}/eval", exist_ok=True)
