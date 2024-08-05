@@ -20,7 +20,7 @@ Price tier: {price_tier}
 Dining style: {dining_style}
 Region: {region}"""
 
-PROMPT_TEMPLATE_ZERO_SHOT = """Write a short restaurant review for the following restaurant:
+PROMPT_TEMPLATE_ZERO_SHOT = """Write a one-sentence restaurant review for the following restaurant:
 Name: {restaurant_name}
 Cuisine: {cuisine}
 Price tier: {price_tier}
