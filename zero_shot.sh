@@ -1,0 +1,12 @@
+python zero_shot.py \
+    --model_name_or_path "microsoft/Phi-3-mini-4k-instruct" \
+    --use_flash_attention \
+    --dataset_split "train_inclusive" \
+    --output_dir "zero_shot" \
+    --per_device_eval_batch_size 8 \
+    --aspect "service" \
+    --max_new_tokens 256 \
+    --num_return_sequences 10 \
+    --classifier_name_or_path "train_classifier" \
+    --do_sample \
+    --temperature 0.7

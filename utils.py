@@ -20,6 +20,15 @@ Price tier: {price_tier}
 Dining style: {dining_style}
 Region: {region}"""
 
+PROMPT_TEMPLATE_ZERO_SHOT = """Write a short restaurant review for the following restaurant:
+Name: {restaurant_name}
+Cuisine: {cuisine}
+Price tier: {price_tier}
+Dining style: {dining_style}
+Region: {region}
+
+Make the review {aspect_sentiments}."""
+
 PROMPT_TEMPLATE_WITH_EXAMPLE = """Your task is to write short restaurant reviews. Follow the same sentiment to food, service, noise, and ambiance as in the example below.
 
 Example restaurant:
@@ -76,12 +85,16 @@ def set_seed(seed=SEED):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-def get_original(df, example):
+def get_original(df, example, return_description=True):
     original_id = example['original_id'] + '000000' if example['original_id'] != '0' else '0'
     base = df[df['id'] == original_id]
-    assert base.shape[0] == 1
+    if base.shape[0] == 0:
+        return None
     base = base.iloc[0]
-    return base['description']
+    if return_description:
+        return base['description']
+    else:
+        return base
 
 def get_prefix(example):
     for i in range(min(len(example['original_description']), len(example['description']))):
@@ -93,6 +106,32 @@ def create_input(datapoint):
     # convert string to dict (VERY UNSAFE, DO NOT USE ON UNTRUSTED DATA)
     metadata = eval(datapoint['opentable_metadata'])
     prompt = PROMPT_TEMPLATE.format(**metadata)
+    completion = datapoint['description']
+    messages = [
+        {'role': 'user', 'content': prompt},
+        {'role': 'assistant', 'content': completion}
+    ]
+    return {'messages': messages}
+
+def create_input_zero_shot(datapoint):
+    # strict order, keep service last
+    ASPECTS = ['food', 'noise', 'ambiance', 'service']
+    # convert string to dict (VERY UNSAFE, DO NOT USE ON UNTRUSTED DATA)
+    metadata = eval(datapoint['opentable_metadata'])
+    aspect_sentiments = {
+        aspect: datapoint[f'{aspect}_aspect_majority']
+        for aspect in ASPECTS if datapoint[f'{aspect}_aspect_majority'] in ['Positive', 'Negative']
+    }
+    aspect_sentiments_str = ''
+    for i, aspect in enumerate(aspect_sentiments):
+        aspect_sentiment = f"{aspect_sentiments[aspect].lower()} towards {aspect}"
+        if i == 0:
+            aspect_sentiments_str = aspect_sentiment
+        elif i == len(aspect_sentiments) - 1:
+            aspect_sentiments_str += f', and {aspect_sentiment}'
+        else:
+            aspect_sentiments_str += f', {aspect_sentiment}'
+    prompt = PROMPT_TEMPLATE_ZERO_SHOT.format(**metadata, aspect_sentiments=aspect_sentiments_str)
     completion = datapoint['description']
     messages = [
         {'role': 'user', 'content': prompt},
