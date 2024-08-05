@@ -71,9 +71,6 @@ def main(
     df = pd.DataFrame(dataset)
     edited_df = df[(~df['is_original']) & (df['edit_type'] == aspect)]
 
-    data = []
-    prompts = []
-    generations = []
     def generate(batch):
         examples = [
             create_input_validation(
@@ -102,8 +99,8 @@ def main(
         prompts_batch = [e for e in examples for _ in range(num_return_sequences)]
         return data_batch, prompts_batch, generations_batch
     
-    def perplexity(batch=None, examples=None):
-        if batch:
+    def perplexity(batch, apply_chat_template=True):
+        if apply_chat_template:
             examples = [
                 tokenizer.apply_chat_template(
                     create_input_zero_shot(example)['messages'], 
@@ -111,6 +108,8 @@ def main(
                 )
                 for example in batch
             ]
+        else:
+            examples = batch
         inputs = tokenizer(
             examples,
             return_tensors="pt",
@@ -118,9 +117,30 @@ def main(
             truncation=True
         ).to(device)
         with torch.no_grad():
-            outputs = model(**inputs, labels=inputs['input_ids'])
-        return torch.exp(outputs.loss).item()
+            outputs = model(**inputs)
+            logits = outputs.logits
+            labels = inputs['input_ids']
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            ces = []
+            for i in range(inputs['input_ids'].shape[0]):
+                ce = torch.nn.functional.cross_entropy(
+                    shift_logits[i], shift_labels[i], reduction='mean'
+                )
+                ces.append(ce)
+        perplexities = torch.exp(torch.stack(ces)).cpu().tolist()
+        if apply_chat_template:
+            # repeat perplexities for each generated sequence
+            perplexities = [
+                p for p in perplexities for _ in range(num_return_sequences)
+            ]
+        return perplexities
 
+    data = []
+    prompts = []
+    generations = []
+    perplexities_cebab = []
+    perplexities_gen = []
     # iterate over edited datapoints
     for b in trange(0, len(edited_df), per_device_eval_batch_size, desc="Generating..."):
         batch_cf = df.iloc[b:b+per_device_eval_batch_size].to_dict(orient="records")
@@ -128,14 +148,26 @@ def main(
             get_original(df, example, return_description=False)
             for example in batch_cf
         ]
-        batch_cf, batch_or = zip(*[
+        filtered_batch = [
             (cf, org.to_dict()) for cf, org in zip(batch_cf, batch_or) if org is not None
-        ])
+        ]
+        if len(filtered_batch) == 0:
+            continue
+        batch_cf, batch_or = zip(*filtered_batch)
+        # generate completions
         data_cf, prompts_cf, generations_cf = generate(batch_cf)
         data_or, prompts_or, generations_or = generate(batch_or)
+        # compute perplexities
+        perplexities_cf = perplexity(batch_cf, apply_chat_template=True)
+        perplexities_or = perplexity(batch_or, apply_chat_template=True)
+        perplexities_cf_gen = perplexity(generations_cf, apply_chat_template=False)
+        perplexities_or_gen = perplexity(generations_or, apply_chat_template=False)
+        # save the data
         data += data_cf + data_or
         prompts += prompts_cf + prompts_or
         generations += generations_cf + generations_or
+        perplexities_cebab += perplexities_cf + perplexities_or
+        perplexities_gen += perplexities_cf_gen + perplexities_or_gen
 
     df = pd.DataFrame(data)
     df['generation'] = generations
@@ -143,6 +175,8 @@ def main(
     df['text'] = df['generation'].map(
         lambda x: x.split(assistant_prefix)[1].split(assistant_suffix)[0].strip()
     )
+    df['perplexity_cebab'] = perplexities_cebab
+    df['perplexity_generation'] = perplexities_gen
 
     # save the generations
     os.makedirs(f"{output_dir}/eval", exist_ok=True)
